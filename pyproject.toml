@@ -1,7 +1,7 @@
 [project]
 name = "miocardio-seg"
 version = "0.1.0"
-description = "Segmentacion binaria del miocardio en MRI cardiaca (ACDC + York) con U-Net"
+description = "Segmentacion del miocardio y diagnostico cardiaco en MRI (ACDC + York) con U-Net 2D"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -9,6 +9,9 @@ dependencies = [
     "numpy>=1.26",
     "matplotlib>=3.8",
     "pandas>=2.0",
+    "nibabel>=5.2",
+    "scipy>=1.11",
+    "scikit-learn>=1.4",
 ]
 
 [dependency-groups]
@@ -28,3 +31,12 @@ markers = [
     "slow: entrena de verdad (segundos), no solo verifica shapes",
     "datos: usa cardiac_data/ o outputs/; se salta si no estan en disco",
 ]
+
+# torch con CUDA para la RTX 4050 (igual que T2-GEN-ASTRO); sin GPU, comentar este bloque
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true

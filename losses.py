@@ -66,6 +66,64 @@ class BCEDiceLoss(nn.Module):
         return self.bce_weight * bce_loss + self.dice_weight * d_loss
 
 
+
+# --------------------------------------------------------------------------- #
+# Multiclase (etapa 2, ACDC): fondo, VD, miocardio, VI
+# --------------------------------------------------------------------------- #
+
+def dice_multiclase_loss(logits: torch.Tensor, targets: torch.Tensor,
+                         ignorar_fondo: bool = True, suavizado: float = 1.0) -> torch.Tensor:
+    """1 - Dice soft promedio sobre clases, acumulado sobre TODO el batch.
+
+    logits: (N, C, H, W); targets: (N, H, W) enteros en [0, C).
+
+    Por batch y no por imagen: en los cortes apicales y basales el VD o el VI
+    no aparecen, y un Dice por imagen con la clase ausente castiga cualquier
+    probabilidad residual con perdida ~1, lo que domina el gradiente.
+
+    suavizado = 1 (Laplace) y no un eps diminuto: si la clase falta en TODO el
+    batch, su probabilidad residual (~1e-6) es comparable a un eps de 1e-6 y el
+    Dice cae a 0.5 aun con la prediccion perfecta. Con 1, una clase ausente bien
+    predicha da Dice ~1, y en las presentes (miles de pixeles) el efecto es nulo.
+    """
+    n_clases = logits.shape[1]
+    probs = torch.softmax(logits, dim=1)
+    onehot = torch.nn.functional.one_hot(targets, n_clases).permute(0, 3, 1, 2).to(probs.dtype)
+    dims = (0, 2, 3)
+    inter = (probs * onehot).sum(dims)
+    denom = probs.sum(dims) + onehot.sum(dims)
+    dice = (2 * inter + suavizado) / (denom + suavizado)
+    if ignorar_fondo:
+        dice = dice[1:]
+    return 1 - dice.mean()
+
+
+class CEDiceLoss(nn.Module):
+    """ce_weight * CrossEntropy + dice_weight * Dice multiclase (sin fondo)."""
+
+    def __init__(self, ce_weight: float = 1.0, dice_weight: float = 1.0):
+        super().__init__()
+        self.ce_weight, self.dice_weight = ce_weight, dice_weight
+        self.ce = nn.CrossEntropyLoss()
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return (self.ce_weight * self.ce(logits, targets)
+                + self.dice_weight * dice_multiclase_loss(logits, targets))
+
+
+def dice_y_iou(pred, target, clase: int):
+    """Dice e IoU duros de una clase entre dos mascaras de etiquetas (cualquier forma).
+
+    Si la clase no esta ni en la prediccion ni en la mascara real, ambos valen 1
+    (misma convencion que `iou_score`).
+    """
+    p, t = (pred == clase), (target == clase)
+    inter = float((p & t).sum())
+    sp, st = float(p.sum()), float(t.sum())
+    if sp + st == 0:
+        return 1.0, 1.0
+    return 2 * inter / (sp + st), inter / (sp + st - inter)
+
 if __name__ == "__main__":
     # sanity checks sin datos reales
     torch.manual_seed(0)
