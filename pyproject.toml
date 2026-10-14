@@ -1,0 +1,30 @@
+[project]
+name = "miocardio-seg"
+version = "0.1.0"
+description = "Segmentacion binaria del miocardio en MRI cardiaca (ACDC + York) con U-Net"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2",
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+    "pandas>=2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ipykernel>=6.29",
+]
+
+# los modulos viven en la raiz y se importan por nombre; no es un paquete instalable
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "slow: entrena de verdad (segundos), no solo verifica shapes",
+    "datos: usa cardiac_data/ o outputs/; se salta si no estan en disco",
+]

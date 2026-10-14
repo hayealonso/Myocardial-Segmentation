@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+.claude/tmp/
+
+# datos (ACDC + York): publicos, pero se obtienen de sus fuentes, no de este repo
+cardiac_data/
+*.npy
+*.npz
+
+# resultados: modelo, historial, metricas y figuras (con imagenes de pacientes)
+outputs/
+*.pt
+*.pth
