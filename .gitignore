@@ -17,3 +17,7 @@ data/
 outputs/
 *.pt
 *.pth
+
+# notas personales, solo locales
+docs/guia-del-codigo.md
+.vscode/

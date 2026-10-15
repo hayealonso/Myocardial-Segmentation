@@ -18,6 +18,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "ipykernel>=6.29",
+    "nbconvert>=7.16",
 ]
 
 # los modulos viven en la raiz y se importan por nombre; no es un paquete instalable

@@ -14,7 +14,6 @@ import json
 from pathlib import Path
 
 import matplotlib
-matplotlib.use("Agg")
 import matplotlib.colors
 import matplotlib.patches
 import matplotlib.pyplot as plt
@@ -156,6 +155,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Figuras de la etapa 2")
     ap.add_argument("--dir", type=str, default="outputs/acdc")
     args = ap.parse_args()
+    # backend sin ventana solo al correr como script: forzarlo al importar el modulo
+    # apagaba las figuras en linea del notebook que reutiliza sus colores
+    plt.switch_backend("Agg")
     out = Path(args.dir)
     figs = out / "figuras"
     figs.mkdir(exist_ok=True)

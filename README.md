@@ -100,6 +100,19 @@ uv run python seguridad.py                 # alertas
 uv run python figuras_acdc.py              # figuras en outputs/acdc/figuras/
 ```
 
+## Notebooks
+
+- `EDA_miocardio.ipynb`: exploracion de los datos de la etapa 1, curvas de entrenamiento y predicciones. Funciona con los splits que haya en `cardiac_data/`.
+- `resultados_acdc.ipynb`: recorrido completo por los resultados de la etapa 2 (no entrena nada). `mostrar_paciente(pid)` dibuja todos los cortes de un paciente con su segmentacion.
+
+Se versionan sin salidas, porque las salidas traen imagenes de pacientes. Para ejecutarlos y verlos como pagina web en `outputs/notebooks/`:
+
+```bash
+uv run jupyter nbconvert --to html --execute resultados_acdc.ipynb --output-dir outputs/notebooks
+```
+
+En VS Code: abrir el notebook, elegir el kernel `.venv` y "Run All". Antes de un commit, "Clear All Outputs".
+
 ## Tests
 
 ```bash
@@ -134,6 +147,7 @@ biomarcadores.py           etapa 2: volumenes, FE, masa y grosor de pared
 diagnostico.py             etapa 2: clasificador de los 5 grupos
 seguridad.py               etapa 2: alertas por paciente
 figuras_acdc.py            etapa 2: figuras
+resultados_acdc.ipynb      etapa 2: recorrido por los resultados
 docs/plan-acdc.md          etapa 2: diseno y protocolo de evaluacion
 tests/                     invariantes del pipeline
 outputs/                   resultados (fuera de git)

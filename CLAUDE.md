@@ -63,6 +63,9 @@ Los tests `datos` se saltan si `cardiac_data/` o `outputs/` no estan. `test_chec
   - `diagnostico.py`: pipeline contra oraculo.
   - `seguridad.py`: alertas.
   - `figuras_acdc.py`: figuras.
+  - `resultados_acdc.ipynb`: recorrido por los resultados.
+- Notebooks: se versionan **sin salidas** porque traen imagenes de pacientes. Para ejecutarlos: `uv run jupyter nbconvert --to html --execute <nb> --output-dir outputs/notebooks`.
+- `docs/guia-del-codigo.md` es una nota personal del usuario: esta en `.gitignore` y **no se sube**.
 
 ## Resultado de referencia
 
