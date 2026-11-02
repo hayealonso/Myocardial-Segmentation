@@ -1,74 +1,104 @@
-# Segmentacion de miocardio y diagnostico cardiaco con U-Net 2D
+# Segmentación de miocardio y diagnóstico cardíaco con U-Net 2D
 
-Proyecto en dos etapas sobre resonancia magnetica cardiaca de eje corto. Las dos usan una U-Net **2D**: cada corte se segmenta por separado, sin cortes vecinos ni secuencia temporal.
+Segmenta estructuras del corazón en resonancia magnética de eje corto y usa esas máscaras para medir el corazón y predecir el diagnóstico. Toda la segmentación es 2D: cada corte se procesa por separado, sin cortes vecinos ni secuencia temporal.
 
-1. **Segmentacion del miocardio** (enunciado del curso): mascara binaria del miocardio sobre una version preprocesada de ACDC + York, maximizando el IoU promedio.
-2. **De la segmentacion al diagnostico** (extension): sobre el ACDC original se segmentan el ventriculo derecho, el miocardio y el ventriculo izquierdo. Con esas mascaras se miden los biomarcadores que usa un cardiologo y se clasifica a cada paciente en 5 grupos. Un modulo de seguridad marca los casos dudosos para revision.
+El proyecto tiene dos etapas:
+
+1. Segmentar el miocardio, como pide el enunciado del curso (maximizar el IoU promedio).
+2. Una extensión: segmentar ventrículo derecho (VD), miocardio y ventrículo izquierdo (VI), medir biomarcadores, clasificar al paciente en 5 grupos y marcar los casos dudosos.
 
 ## Resultados
 
-### Etapa 1: miocardio (datos del curso)
+### Etapa 1: miocardio
 
-| | IoU |
-|---|---|
-| Validacion (mejor epoca, 19 de 25) | 0.7231 |
-| Test | 0.7479 |
+| Medición | Validación | Test |
+|---|---|---|
+| IoU a 128×128 | 0,723 | 0,748 |
+| IoU a 256×256, la resolución original | 0,705 | 0,737 |
 
-Imagenes a 128x128, `base_channels=16`, BCE + Dice, CPU. Es el IoU promedio por imagen, medido a 128x128. La mascara quedo desalineada medio pixel al reducirla y corregirlo exige reentrenar: a la resolucion original de 256x256 el IoU de validacion es 0.7048.
+El valor comparable con la imagen original es el de 256×256. La diferencia viene de un error conocido: al reducir a 128×128 la máscara queda corrida medio píxel respecto de la imagen, y el modelo aprendió ese desfase. Corregirlo exige reentrenar, y todavía no se ha hecho.
 
-### Etapa 2: ACDC original, test oficial de 50 pacientes
+### Etapa 2: ACDC, los 50 pacientes del test oficial
 
-Ninguna decision depende de test: validacion cruzada por paciente, biomarcadores fuera de pliegue para entrenar el clasificador, y umbrales de alerta fijados en training.
+Dice 3D por paciente, en fin de diástole (FD) y fin de sístole (FS):
 
-| Segmentacion (Dice 3D, FD / FS) | |
-|---|---|
-| Ventriculo izquierdo | 0.969 / 0.931 |
-| Miocardio | 0.904 / 0.917 |
-| Ventriculo derecho | 0.941 / 0.883 |
-| IoU 2D del miocardio (metrica del curso) | 0.802 / 0.827 |
+| Estructura | FD | FS |
+|---|---|---|
+| Ventrículo izquierdo | 0,969 | 0,931 |
+| Miocardio | 0,904 | 0,917 |
+| Ventrículo derecho | 0,941 | 0,883 |
 
-| Biomarcador (prediccion contra mascara real) | sesgo | DE | r |
+El mejor método de la [tabla oficial del ACDC](https://www.creatis.insa-lyon.fr/Challenge/acdc/results.html) (Isensee) tiene 0,967/0,928 en VI, 0,896/0,919 en miocardio y 0,946/0,904 en VD. La comparación es orientativa, porque esta evaluación no pasó por la plataforma oficial.
+
+Biomarcadores contra los medidos con las máscaras de los expertos:
+
+| Biomarcador | Sesgo | Desvío del error | Correlación |
 |---|---|---|---|
-| FE del VI (puntos %) | 0.1 | 3.5 | 0.988 |
-| FE del VD (puntos %) | 2.1 | 7.3 | 0.870 |
-| Masa del miocardio (g) | 2.9 | 8.9 | 0.985 |
+| Fracción de eyección (FE) del VI | +0,1 puntos | 3,5 puntos | 0,988 |
+| FE del VD | +2,1 puntos | 7,3 puntos | 0,870 |
+| Volumen del VI en FD | −2,1 ml | 5,5 ml | 0,997 |
+| Masa del miocardio | +2,9 g | 8,9 g | 0,985 |
 
-| Diagnostico (NOR, MINF, DCM, HCM, RV) | exactitud |
-|---|---|
-| Pipeline: mascaras predichas | **94 %** (47/50) |
-| Oraculo: mascaras de los expertos | 94 % (47/50) |
-| Validacion cruzada en training: pipeline / oraculo | 92.1 % / 93.9 % |
+Diagnóstico en 5 grupos:
 
-Modulo de seguridad en test:
-- Marco 6 de 50 pacientes y atrapo 2 de los 3 errores.
-- Los 44 no marcados aciertan el 97.7 %.
+| Biomarcadores usados | Validación cruzada en training | Test | IC 95 % en test |
+|---|---|---|---|
+| Máscaras predichas (el sistema) | 92,1 % | 94 % (47/50) | 84 a 98 % |
+| Máscaras de expertos (cota superior) | 93,9 % | 94 % (47/50) | 84 a 98 % |
 
-En training (fuera de pliegue) marco 20 de 100 y atrapo 6 de 7 errores; los no marcados aciertan el 98.8 %. Con 50 pacientes de test, cada error mueve la exactitud en 2 puntos.
+Los errores en test fueron un infarto predicho como dilatada, una dilatada predicha como infarto y un VD anormal predicho como normal.
+
+El módulo de seguridad marcó 6 de 50 pacientes y entre ellos estaban 2 de los 3 errores. Los 44 no marcados aciertan el 97,7 %. En training marcó 20 de 100, con 6 de los 7 errores.
 
 ## Datos
 
+Este repositorio no incluye datos, modelos ni imágenes de pacientes.
+
+Etapa 1: versión preprocesada de ACDC y York, entregada por el curso. Se copia en `cardiac_data/` como `{train,val,test}_{imgs,annot}.npy`. Son imágenes uint8 de 256×256 (4.564, 502 y 1.240), y las máscaras traen 0 fondo, 1 miocardio y 2 cavidad del VI. El miocardio ocupa cerca del 1,2 % de los píxeles.
+
+Etapa 2: [ACDC original](https://humanheart-project.creatis.insa-lyon.fr/database/#collection/637218c173e9f0047faa00fb), en `data/ACDC/database/`. Son 150 pacientes (100 de training y 50 de test), con 30 por grupo: normal (NOR), infarto previo (MINF), miocardiopatía dilatada (DCM), miocardiopatía hipertrófica (HCM) y VD anormal (RV). Cada uno trae imágenes y anotaciones en FD y FS, altura y peso. Las máscaras traen 0 fondo, 1 VD, 2 miocardio y 3 VI. La licencia es CC BY-NC-SA 4.0 y su uso exige citar a Bernard et al. (2018).
+
+## Metodología
+
 ### Etapa 1
 
-Las bases de datos originales son publicas ([ACDC](https://acdc.creatis.insa-lyon.fr/) y [York](http://www.cse.yorku.ca/~mridataset/)), pero cada una tiene sus propios terminos de uso, asi que este repositorio **no incluye datos** ni imagenes derivadas. Se usa una version preprocesada (normalizada a 256x256 con zero-padding) que hay que copiar en `cardiac_data/`:
-
-```
-cardiac_data/
-  train_imgs.npy   train_annot.npy
-  val_imgs.npy     val_annot.npy
-  test_imgs.npy    test_annot.npy
-```
-
-Cada `*_imgs.npy` es `(N, 256, 256)` uint8 y cada `*_annot.npy` es una mascara con 0 = fondo, 1 = miocardio, 2 = cavidad del ventriculo izquierdo. Los splits no comparten sujetos. Detalle en `cardiac_data/data_description.txt`.
+- Preprocesamiento: la clase 1 pasa a ser el único positivo. Las imágenes se dividen por 255 y se estandarizan con la media y el desvío de train.
+- Modelo: U-Net de 4 niveles con `base_channels=16` (1,9 millones de parámetros), a 128×128.
+- Entrenamiento: BCE + Dice, porque el miocardio es muy minoritario. Adam con tasa 1e-3 y `ReduceLROnPlateau` sobre el IoU de validación, 25 épocas, lotes de 16. La aumentación usa flips y rotaciones de 90°.
+- Selección: se guarda la época con mejor IoU de validación (la 19).
 
 ### Etapa 2
 
-ACDC original (150 pacientes, NIfTI), descargado del [portal Human Heart Project de CREATIS](https://humanheart-project.creatis.insa-lyon.fr/database/#collection/637218c173e9f0047faa00fb) en `data/ACDC/database/`. Licencia CC BY-NC-SA 4.0. Cualquier uso debe citar:
+1. Preprocesamiento. Cada volumen se recorta a los percentiles 1 y 99 y se estandariza con sus propios valores, porque cada equipo usa otra escala. Cada corte se remuestrea a 1,5 mm por píxel y se recorta a 192×192; el caso más exigente del ACDC necesita 179 píxeles.
+2. Segmentación. U-Net de 4 clases con `base_channels=32` (7,8 millones de parámetros). Pérdida de entropía cruzada + Dice, AdamW con tasa 1e-3 y coseno, precisión mixta, 100 épocas fijas. Se entrenan 5 modelos con validación cruzada por paciente.
+3. Inferencia. Cada paciente de training lo segmenta el modelo que no lo vio; los de test, el promedio de los 5. Siempre se promedian las 8 simetrías del cuadrado (TTA). La predicción vuelve a la resolución original del paciente antes de medir.
+4. Biomarcadores. Son 16 por paciente: volúmenes del VI y del VD, FE de ambos, masa, valores por superficie corporal, razones VD/VI y masa/VI, grosor de pared y su engrosamiento de FD a FS.
+5. Clasificador. Se comparan regresión logística y bosque aleatorio con validación cruzada en training, y gana el mejor al redondear a 3 decimales; en empate, la logística. Ganó la logística. Se entrena con los biomarcadores de las máscaras predichas por modelos que no vieron a esos pacientes.
+6. Módulo de seguridad. Un paciente se marca si sus biomarcadores cambian mucho entre las 8 vistas (sobre el percentil 90 de training) o si el clasificador duda entre dos grupos (margen bajo el percentil 10 de training).
 
-> O. Bernard et al., "Deep Learning Techniques for Automatic MRI Cardiac Multi-structures Segmentation and Diagnosis: Is the Problem Solved?", IEEE TMI 37(11), 2018. doi:10.1109/TMI.2018.2837502
+### Cómo se evita inflar los resultados
 
-## Instalacion
+- Las divisiones son por paciente, porque los cortes de un mismo corazón son casi iguales.
+- La segmentación usa épocas fijas: el pliegue retenido nunca elige la época, porque sus predicciones entrenan después al clasificador.
+- El clasificador y los umbrales de alerta se eligen solo con training.
+- Los pesos de la etapa 1 no se reutilizan en la etapa 2, porque los datos comparten origen.
 
-Requiere [uv](https://docs.astral.sh/uv/). PyTorch se instala con CUDA 12.6; sin GPU, comentar el bloque `[tool.uv.sources]` de `pyproject.toml`.
+Hubo contactos menores con test, ninguno cambió una decisión. El tamaño del recorte se midió primero con los 150 pacientes, pero solo con training da lo mismo (179 píxeles). Las medianas por grupo incluyen test, y son solo descriptivas. La exactitud del oráculo en test se vio antes de implementar el módulo de seguridad, cuyos umbrales salen solo de training.
+
+## Limitaciones
+
+- Con 50 pacientes de test, cada error mueve la exactitud 2 puntos. Empatar con la cota superior no prueba que segmentar automáticamente no cueste nada: en validación cruzada la diferencia es de 1,8 puntos.
+- Todo el ACDC viene de un solo centro. Falta validar con otros equipos, por ejemplo con M&Ms.
+- La FE del VD es la medida más débil.
+- Infarto y dilatada se confunden: ambos tienen el VI grande y una FE baja.
+- El umbral de alertas se calibró con un modelo por paciente y en test se aplica a un promedio de 5, lo que probablemente explica que marque 12 % en test y 20 % en training. Ajustarlo ahora sería decidir mirando test.
+- La relación entre la dispersión de la FE y su error real es débil (Spearman 0,23 a 0,37). La alerta ayuda a priorizar qué revisar y no garantiza nada.
+- En los datos de la etapa 1, 16 imágenes consecutivas aparecen en val y en test con máscaras distintas, y parecen un sujeto anotado dos veces. Sin ellas, el IoU de test a 256×256 pasa de 0,7373 a 0,7374. Train no comparte imágenes con val ni con test.
+- Es un proyecto académico, sin validación clínica.
+
+## Instalación
+
+Requiere [uv](https://docs.astral.sh/uv/). PyTorch se instala con CUDA 12.6; sin GPU, comenta el bloque `[tool.uv.sources]` de `pyproject.toml`.
 
 ```bash
 uv sync
@@ -76,84 +106,60 @@ uv sync
 
 ## Uso
 
+Etapa 1:
+
 ```bash
-# entrenamiento (la configuracion del resultado de arriba)
 uv run python train.py cardiac_data --epochs 25 --img-size 128 --base-channels 16
-
-# imagenes de las segmentaciones: verde = acierto, rojo = falso positivo, azul = falso negativo
-uv run python visualize_predictions.py cardiac_data --split test --n 8 --individuales
-uv run python visualize_predictions.py cardiac_data --split val --orden peores    # casos mas dificiles
+uv run python visualize_predictions.py cardiac_data --split test --orden peores --individuales
 ```
 
-`--orden` elige las imagenes al azar (`aleatorio`) o las de menor o mayor IoU del split (`peores`, `mejores`). `--individuales` guarda ademas una figura por imagen.
-
-Todos los resultados van a `outputs/`, que no se versiona: `train.py` guarda el mejor modelo segun el IoU de validacion (`best_model.pt`, que incluye la media y el std de normalizacion), el historial por epoca (`history.json`) y el resultado en test (`test_results.json`); `visualize_predictions.py` guarda la grilla `predicciones_<split>_<orden>.png` y, con `--individuales`, una figura por imagen en `segmentaciones_<split>_<orden>/`.
-
-Etapa 2, en orden (las salidas van a `outputs/acdc/`):
+Etapa 2, en orden:
 
 ```bash
-uv run python acdc_data.py                 # cache de cortes preprocesados
-uv run python train_acdc.py --fold 0       # repetir para los pliegues 0 a 4 (~18 min cada uno en una RTX 4050)
-uv run python inferir_acdc.py              # segmentacion con TTA, biomarcadores e incertidumbre
-uv run python diagnostico.py               # clasificador: pipeline y oraculo
-uv run python seguridad.py                 # alertas
-uv run python figuras_acdc.py              # figuras en outputs/acdc/figuras/
+uv run python acdc_data.py
+for k in 0 1 2 3 4; do uv run python train_acdc.py --fold $k; done
+uv run python inferir_acdc.py
+uv run python diagnostico.py
+uv run python seguridad.py
+uv run python figuras_acdc.py
 ```
 
-## Notebooks
+Cada pliegue tarda unos 18 minutos en una RTX 4050. Todo lo que se genera queda en `outputs/`, fuera de git.
 
-- `EDA_miocardio.ipynb`: exploracion de los datos de la etapa 1, curvas de entrenamiento y predicciones. Funciona con los splits que haya en `cardiac_data/`.
-- `resultados_acdc.ipynb`: recorrido completo por los resultados de la etapa 2 (no entrena nada). `mostrar_paciente(pid)` dibuja todos los cortes de un paciente con su segmentacion.
-
-Se versionan sin salidas, porque las salidas traen imagenes de pacientes. Para ejecutarlos y verlos como pagina web en `outputs/notebooks/`:
+Notebooks: `EDA_miocardio.ipynb` explora los datos de la etapa 1 y `resultados_acdc.ipynb` recorre los resultados de la etapa 2 sin reentrenar. En VS Code elige el kernel `.venv`. Sus salidas traen imágenes de pacientes, así que antes de un commit usa "Clear All Outputs". Para verlos como página web:
 
 ```bash
 uv run jupyter nbconvert --to html --execute resultados_acdc.ipynb --output-dir outputs/notebooks
 ```
 
-En VS Code: abrir el notebook, elegir el kernel `.venv` y "Run All". Antes de un commit, "Clear All Outputs".
-
-## Tests
+## Pruebas
 
 ```bash
-uv run pytest -q                                   # todo
-uv run pytest -q -m "not slow"                     # sin los que entrenan
-uv run pytest -q -m "not slow and not datos"       # sin datos ni checkpoint
+uv run pytest -q
 ```
 
-Los tests verifican invariantes que fallan en silencio, es decir, los errores que entrenan sin excepcion pero dan resultados equivocados. Por ejemplo:
-- aumentacion distinta en imagen y mascara, o mascara corrida medio pixel al remuestrear;
-- convencion de etiquetas del ACDC;
-- volumenes y grosor de pared contra geometrias conocidas;
-- inversion de las vistas de TTA;
-- fuga de test hacia la seleccion del clasificador;
-- reproduccion exacta del IoU del checkpoint de la etapa 1.
+Vigilan errores que no lanzan excepción pero dan resultados equivocados, por ejemplo una máscara transformada distinto que su imagen, etiquetas mal interpretadas, volúmenes o grosores mal medidos y datos de test filtrados en la selección del clasificador. Las que necesitan datos se saltan si no están en disco.
 
-Los que necesitan datos se saltan si no estan en disco.
+## Archivos
 
-## Estructura
-
-```
-cardiac_dataset.py         carga, binarizacion, normalizacion, Dataset y DataLoaders
-model.py                   U-Net y guardado/carga de checkpoints
-losses.py                  IoU y perdida BCE + Dice
-train.py                   entrenamiento y evaluacion en test
-visualize_predictions.py   figura de predicciones
-EDA_miocardio.ipynb        exploracion de datos y curvas de entrenamiento
-acdc_data.py               etapa 2: lectura y preprocesamiento reversible del ACDC
-train_acdc.py              etapa 2: U-Net de 4 clases por pliegue
-inferir_acdc.py            etapa 2: TTA, grilla nativa, biomarcadores e incertidumbre
-biomarcadores.py           etapa 2: volumenes, FE, masa y grosor de pared
-diagnostico.py             etapa 2: clasificador de los 5 grupos
-seguridad.py               etapa 2: alertas por paciente
-figuras_acdc.py            etapa 2: figuras
-resultados_acdc.ipynb      etapa 2: recorrido por los resultados
-tests/                     invariantes del pipeline
-outputs/                   resultados (fuera de git)
-```
+| Archivo | Contenido |
+|---|---|
+| `cardiac_dataset.py` | Datos de la etapa 1 |
+| `model.py` | U-Net y checkpoints |
+| `losses.py` | Pérdidas y métricas |
+| `train.py` | Entrenamiento de la etapa 1 |
+| `visualize_predictions.py` | Figuras de la etapa 1 |
+| `acdc_data.py` | Datos de la etapa 2 |
+| `train_acdc.py` | Entrenamiento por pliegue |
+| `inferir_acdc.py` | Segmentación con TTA y biomarcadores por paciente |
+| `biomarcadores.py` | Volúmenes, FE, masa y grosor de pared |
+| `diagnostico.py` | Clasificador de los 5 grupos |
+| `seguridad.py` | Alertas por paciente |
+| `figuras_acdc.py` | Figuras de la etapa 2 |
+| `tests/` | Pruebas |
 
 ## Referencias
 
 - Ronneberger, Fischer y Brox. *U-Net: Convolutional Networks for Biomedical Image Segmentation*. MICCAI 2015.
-- Bernard et al. *Deep Learning Techniques for Automatic MRI Cardiac Multi-structures Segmentation and Diagnosis: Is the Problem Solved?* IEEE TMI 2018 (ACDC).
-- Andreopoulos y Tsotsos. *Efficient and generalizable statistical models of shape and appearance for analysis of cardiac MRI*. Medical Image Analysis 2008 (York).
+- Bernard et al. *Deep Learning Techniques for Automatic MRI Cardiac Multi-structures Segmentation and Diagnosis: Is the Problem Solved?* IEEE TMI 37(11), 2018. doi:10.1109/TMI.2018.2837502
+- Andreopoulos y Tsotsos. *Efficient and generalizable statistical models of shape and appearance for analysis of cardiac MRI*. Medical Image Analysis, 2008.

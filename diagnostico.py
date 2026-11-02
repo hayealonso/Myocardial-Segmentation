@@ -1,24 +1,15 @@
 """
-Diagnostico de los 5 grupos del ACDC a partir de biomarcadores (etapa 2).
+Predice el grupo de cada paciente del ACDC a partir de sus biomarcadores.
 
-Uso:
-    python diagnostico.py               # despues de inferir_acdc.py
+    python diagnostico.py       # despues de inferir_acdc.py
 
-Lee outputs/acdc/pacientes.csv y compara dos fuentes de biomarcadores:
-  - pipeline: medidos sobre las mascaras PREDICHAS (fuera de pliegue en training)
-  - oraculo:  medidos sobre las mascaras reales (cota superior)
+Se evalua con dos fuentes: las mascaras predichas (el sistema real) y las de los expertos
+(el oraculo, la cota superior). El modelo se elige con validacion cruzada en training y
+test se usa una sola vez.
 
-Regla de seleccion fijada antes de mirar test: el modelo con mejor exactitud
-media en validacion cruzada repetida sobre training (5 pliegues x 10); en empate
-gana el mas simple (regresion logistica). Test se evalua una sola vez.
-
-Salidas en outputs/acdc/:
-    diagnostico.json            exactitudes, matrices de confusion, modelo elegido
-    diagnostico_pacientes.csv   prediccion y probabilidades por paciente
-                                (en training, fuera de pliegue: insumo del modulo de seguridad)
+Salidas en outputs/acdc/: diagnostico.json y diagnostico_pacientes.csv. En training las
+probabilidades son fuera de pliegue, porque de ahi salen los umbrales de seguridad.
 """
-
-from __future__ import annotations
 
 import argparse
 import json
@@ -39,8 +30,7 @@ from biomarcadores import NOMBRES
 SEMILLA = 0
 
 
-def candidatos(n_arboles: int = 500):
-    """Orden = preferencia en empate (el primero es el mas simple)."""
+def candidatos(n_arboles=500):
     return {
         "logistica": make_pipeline(StandardScaler(), LogisticRegression(C=1.0, max_iter=5000)),
         "bosque": RandomForestClassifier(n_estimators=n_arboles, min_samples_leaf=2,
@@ -48,74 +38,89 @@ def candidatos(n_arboles: int = 500):
     }
 
 
-def elegir(puntajes: dict) -> str:
-    """Mejor exactitud de CV redondeada a 3 decimales; en empate, el primero
-    de `candidatos()` (el mas simple). Diferencias menores a 0.001 con 100
-    pacientes son ruido, no razon para preferir el modelo mas complejo."""
-    orden = list(candidatos())
-    return max(puntajes, key=lambda n: (round(puntajes[n], 3), -orden.index(n)))
+def elegir(puntajes):
+    """El bosque solo gana si supera a la logistica al redondear a 3 decimales: con 100
+    pacientes, una diferencia menor es ruido."""
+    if round(puntajes["bosque"], 3) > round(puntajes["logistica"], 3):
+        return "bosque"
+    return "logistica"
 
 
-def matriz(fuente: str, df: pd.DataFrame) -> np.ndarray:
-    return df[[f"{fuente}_{n}" for n in NOMBRES]].to_numpy(dtype=float)
+def matriz(fuente, df):
+    columnas = [f"{fuente}_{nombre}" for nombre in NOMBRES]
+    return df[columnas].to_numpy(dtype=float)
 
 
-def evaluar(df: pd.DataFrame, fuente: str, repeticiones: int = 10, n_arboles: int = 500) -> dict:
-    """Selecciona el modelo con CV en training, entrena en training y evalua en test."""
-    tr, te = df[df.split == "training"], df[df.split == "testing"]
-    X_tr, y_tr = matriz(fuente, tr), tr.grupo.to_numpy()
-    X_te, y_te = matriz(fuente, te), te.grupo.to_numpy()
+def evaluar(df, fuente, repeticiones=10, n_arboles=500):
+    """Elige el modelo con CV en training, lo entrena en training y lo evalua en test."""
+    train = df[df.split == "training"]
+    test = df[df.split == "testing"]
+    X_train, y_train = matriz(fuente, train), train.grupo.to_numpy()
+    X_test, y_test = matriz(fuente, test), test.grupo.to_numpy()
 
     cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=repeticiones, random_state=SEMILLA)
-    puntajes = {nombre: cross_val_score(m, X_tr, y_tr, cv=cv).mean()
-                for nombre, m in candidatos(n_arboles).items()}
+    puntajes = {}
+    for nombre, modelo in candidatos(n_arboles).items():
+        puntajes[nombre] = float(cross_val_score(modelo, X_train, y_train, cv=cv).mean())
     elegido = elegir(puntajes)
 
     modelo = candidatos(n_arboles)[elegido]
-    oof = cross_val_predict(candidatos(n_arboles)[elegido], X_tr, y_tr, method="predict_proba",
-                            cv=StratifiedKFold(5, shuffle=True, random_state=SEMILLA))
-    modelo.fit(X_tr, y_tr)
+    probs_train = cross_val_predict(modelo, X_train, y_train, method="predict_proba",
+                                    cv=StratifiedKFold(5, shuffle=True, random_state=SEMILLA))
+    modelo.fit(X_train, y_train)
     clases = list(modelo.classes_)
-    prob_te = modelo.predict_proba(X_te)
-    pred_te = np.array(clases)[prob_te.argmax(1)]
+    probs_test = modelo.predict_proba(X_test)
+    pred_test = np.array(clases)[probs_test.argmax(axis=1)]
     return {
-        "cv_training": {k: float(v) for k, v in puntajes.items()},
+        "cv_training": puntajes,
         "elegido": elegido,
-        "exactitud_test": float(accuracy_score(y_te, pred_te)),
-        "confusion_test": confusion_matrix(y_te, pred_te, labels=list(GRUPOS)).tolist(),
-        "_clases": clases, "_prob_tr": oof, "_prob_te": prob_te,
+        "exactitud_test": float(accuracy_score(y_test, pred_test)),
+        "confusion_test": confusion_matrix(y_test, pred_test, labels=list(GRUPOS)).tolist(),
+        "_clases": clases,
+        "_prob_tr": probs_train,
+        "_prob_te": probs_test,
     }
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description="Clasificador de diagnostico ACDC")
-    ap.add_argument("--dir", type=str, default="outputs/acdc")
-    args = ap.parse_args()
+def filas_por_paciente(df, split, probs, clases):
+    filas = []
+    for (_, paciente), probs_paciente in zip(df[df.split == split].iterrows(), probs):
+        ordenadas = np.sort(probs_paciente)
+        fila = {"pid": paciente.pid, "split": split, "grupo": paciente.grupo,
+                "pred": clases[int(probs_paciente.argmax())],
+                "margen": float(ordenadas[-1] - ordenadas[-2])}
+        for clase, prob in zip(clases, probs_paciente):
+            fila[f"p_{clase}"] = float(prob)
+        filas.append(fila)
+    return filas
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Clasificador de diagnostico del ACDC")
+    parser.add_argument("--dir", default="outputs/acdc")
+    args = parser.parse_args()
     out = Path(args.dir)
     df = pd.read_csv(out / "pacientes.csv")
-    assert df[[f"pred_{n}" for n in NOMBRES]].notna().all().all(), "hay biomarcadores NaN"
+    columnas_pred = [f"pred_{nombre}" for nombre in NOMBRES]
+    assert df[columnas_pred].notna().all().all(), "hay biomarcadores NaN"
 
-    resultados, filas = {}, []
-    for fuente in ("pred", "real"):
-        r = evaluar(df, fuente)
-        clave = "pipeline" if fuente == "pred" else "oraculo"
-        resultados[clave] = {k: v for k, v in r.items() if not k.startswith("_")}
-        print(f"{clave:8s}: CV training {r['cv_training']} -> {r['elegido']} | "
-              f"exactitud test = {r['exactitud_test']:.2%}")
-        if fuente == "pred":
-            for split, probs in (("training", r["_prob_tr"]), ("testing", r["_prob_te"])):
-                sub = df[df.split == split]
-                for (_, fila), pr in zip(sub.iterrows(), probs):
-                    orden = np.sort(pr)[::-1]
-                    filas.append({"pid": fila.pid, "split": split, "grupo": fila.grupo,
-                                  "pred": r["_clases"][int(pr.argmax())],
-                                  "margen": float(orden[0] - orden[1]),
-                                  **{f"p_{c}": float(v) for c, v in zip(r["_clases"], pr)}})
+    sistema = evaluar(df, "pred")
+    oraculo = evaluar(df, "real")
+    print(f"sistema: CV {sistema['cv_training']} -> {sistema['elegido']} | test {sistema['exactitud_test']:.2%}")
+    print(f"oraculo: CV {oraculo['cv_training']} -> {oraculo['elegido']} | test {oraculo['exactitud_test']:.2%}")
 
-    resultados["grupos"] = list(GRUPOS)
+    claves = ("cv_training", "elegido", "exactitud_test", "confusion_test")
+    resultados = {
+        "pipeline": {clave: sistema[clave] for clave in claves},
+        "oraculo": {clave: oraculo[clave] for clave in claves},
+        "grupos": list(GRUPOS),
+    }
     (out / "diagnostico.json").write_text(json.dumps(resultados, indent=2))
+
+    filas = filas_por_paciente(df, "training", sistema["_prob_tr"], sistema["_clases"])
+    filas += filas_por_paciente(df, "testing", sistema["_prob_te"], sistema["_clases"])
     pd.DataFrame(filas).to_csv(out / "diagnostico_pacientes.csv", index=False)
-    print(f"Guardado {out / 'diagnostico.json'} y diagnostico_pacientes.csv")
+    print(f"Guardado en {out}")
 
 
 if __name__ == "__main__":

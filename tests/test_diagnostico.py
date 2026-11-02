@@ -2,7 +2,7 @@
 
 La falla silenciosa tipica aca es la fuga: que test influya, aunque sea un poco,
 en la eleccion del modelo o en los umbrales de alerta. El numero de test sale
-optimista y nada lo delata.
+optimista.
 """
 
 from __future__ import annotations
@@ -78,8 +78,8 @@ def test_riesgo_cobertura_ordena_de_menor_a_mayor_duda():
 
 def test_riesgo_cobertura_no_depende_del_orden_en_los_empates():
     """Dos pacientes con la misma duda entran juntos a la curva. Si se cortaran,
-    el resultado dependeria de su numero de paciente: la curva cambia sin error
-    al reordenar el CSV."""
+    el resultado dependeria de su numero de paciente: la curva cambia al
+    reordenar el CSV."""
     duda = np.array([0.1, 0.5, 0.5, 0.9])
     cob_a, exa_a = S.riesgo_cobertura(np.array([1.0, 1.0, 0.0, 1.0]), duda)
     cob_b, exa_b = S.riesgo_cobertura(np.array([1.0, 0.0, 1.0, 1.0]), duda)

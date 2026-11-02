@@ -27,7 +27,7 @@ hay_acdc = pytest.mark.skipif(not ACDC.exists(), reason="data/ACDC no esta en di
 def test_normalizacion_no_depende_de_la_escala_del_equipo():
     """El mismo corazon guardado como float32 [0, 1] o como int16 [0, 4000]
     tiene que quedar igual: si no, la red ve a cada equipo en otro rango y
-    rinde peor en los equipos poco frecuentes, sin ningun error."""
+    rinde peor en los equipos poco frecuentes."""
     rng = np.random.default_rng(0)
     vol = rng.gamma(2.0, 1.0, (32, 32, 6)).astype(np.float32)
     a = A.normalizar_volumen(vol)
@@ -52,7 +52,7 @@ def test_un_valor_extremo_no_aplasta_el_contraste():
 def test_remuestreo_mantiene_alineadas_imagen_y_mascara(factor):
     """La mascara usa `nearest-exact`: `nearest` toma la esquina del pixel y
     corre la mascara ~0.47 px respecto de la imagen bilinear, siempre hacia el
-    mismo lado. El IoU contra esas mascaras baja un poco, y nada lo delata.
+    mismo lado. El IoU contra esas mascaras baja un poco.
 
     Un solo bloque no distingue sesgo de redondeo; el promedio de muchos si.
     """
@@ -233,7 +233,7 @@ def test_convencion_de_etiquetas_del_acdc():
 def test_el_recorte_no_corta_ningun_corazon():
     """192 px a 1.5 mm contienen todas las anotaciones del ACDC (el peor caso
     necesita 179). Si el recorte cortara un corazon, el volumen medido saldria
-    menor y la FE mal, sin ningun error."""
+    menor y la FE mal."""
     for p in A.listar_pacientes(ACDC):
         for fase in A.FASES:
             _, gt, esp = A.cargar_fase(p, fase)

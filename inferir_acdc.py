@@ -1,32 +1,23 @@
 """
-Inferencia del ACDC: segmentacion con TTA -> grilla nativa -> biomarcadores e incertidumbre.
+Segmenta a los 150 pacientes del ACDC, vuelve a la grilla nativa y mide biomarcadores.
 
-Uso:
-    python inferir_acdc.py              # despues de entrenar los 5 pliegues
+    python inferir_acdc.py      # despues de entrenar los 5 pliegues
 
-Por paciente:
-  - training: lo segmenta el modelo del pliegue que NO lo vio (fuera de pliegue).
-  - testing: lo segmentan los 5 modelos; la prediccion es el promedio.
+Cada paciente de training lo segmenta el modelo que no lo vio. Los de test, los 5
+modelos promediados. Siempre se promedian las 8 simetrias del cuadrado (TTA), y la
+dispersion de los biomarcadores entre esas vistas es la incertidumbre del paciente.
 
-TTA: las 8 simetrias del cuadrado (flips + rotaciones de 90). La prediccion
-final promedia las probabilidades de todas las vistas; la dispersion de los
-biomarcadores ENTRE vistas es la incertidumbre del modulo de seguridad. En test
-se calcula por modelo y se promedia entre modelos; ese promedio recorta las colas,
-asi que el umbral calibrado en training (un modelo por paciente) tiende a marcar menos.
+En test esa dispersion se calcula por modelo y se promedia. El promedio recorta las
+colas, asi que el umbral calibrado en training tiende a marcar menos pacientes en test.
 
-Salidas en outputs/acdc/:
-    pacientes.csv                       biomarcadores predichos, reales, Dice e incertidumbre
-    mascaras/<pid>.npz                  mascaras predichas en la grilla nativa (FD y FS)
+Salidas en outputs/acdc/: pacientes.csv y mascaras/<pid>.npz
 """
 
-from __future__ import annotations
-
 import argparse
-import csv
 from pathlib import Path
-from typing import Tuple
 
 import numpy as np
+import pandas as pd
 import torch
 
 import acdc_data as A
@@ -34,120 +25,131 @@ from biomarcadores import NOMBRES, biomarcadores
 from losses import dice_y_iou
 from train_acdc import cargar_modelo
 
-# clases en las que se reporta la segmentacion
 CLASES = {"vd": A.VD, "mio": A.MIOCARDIO, "vi": A.VI}
 
 
-def vistas_d4(x: torch.Tensor):
-    """Las 8 simetrias del cuadrado sobre los dos ultimos ejes: (k, flip, tensor)."""
+def vistas_d4(x):
+    """Las 8 simetrias del cuadrado sobre los dos ultimos ejes: lista de (k, flip, tensor)."""
+    vistas = []
     for flip in (False, True):
-        xf = torch.flip(x, dims=(-1,)) if flip else x
+        x_flip = torch.flip(x, dims=(-1,)) if flip else x
         for k in range(4):
-            yield k, flip, torch.rot90(xf, k, dims=(-2, -1))
+            vistas.append((k, flip, torch.rot90(x_flip, k, dims=(-2, -1))))
+    return vistas
 
 
-def deshacer_vista(y: torch.Tensor, k: int, flip: bool) -> torch.Tensor:
-    """Inversa de una vista: primero se deshace la rotacion, despues el flip.
-
-    En el orden contrario las vistas con flip quedan rotadas 180 grados respecto
-    de la imagen, y el promedio de TTA mezcla predicciones desalineadas sin error.
-    """
+def deshacer_vista(y, k, flip):
+    """Primero deshace la rotacion y despues el flip. En otro orden las vistas quedan desalineadas."""
     y = torch.rot90(y, -k, dims=(-2, -1))
-    return torch.flip(y, dims=(-1,)) if flip else y
+    if flip:
+        y = torch.flip(y, dims=(-1,))
+    return y
 
 
 @torch.no_grad()
-def probabilidades_tta(model, cortes: np.ndarray, device) -> np.ndarray:
-    """(Z, H, W) -> (V, Z, C, H, W): probabilidades de cada vista, ya desrotadas."""
+def probabilidades_tta(model, cortes, device):
+    """(Z, H, W) -> (vistas, Z, clases, H, W)."""
     x = torch.from_numpy(cortes).unsqueeze(1).to(device)
     salida = []
-    for k, flip, xv in vistas_d4(x):
-        p = torch.softmax(model(xv).float(), dim=1)
-        salida.append(deshacer_vista(p, k, flip).cpu().numpy())
+    for k, flip, x_vista in vistas_d4(x):
+        probs = torch.softmax(model(x_vista).float(), dim=1)
+        salida.append(deshacer_vista(probs, k, flip).cpu().numpy())
     return np.stack(salida)
 
 
-def mascara_nativa(probs: np.ndarray, geo: A.Geometria) -> np.ndarray:
-    """(Z, C, TAMANO, TAMANO) -> etiquetas (Z, H, W) en la grilla nativa."""
-    return A.a_nativo(probs, geo).argmax(1).astype(np.uint8)
+def mascara_nativa(probs, geometria):
+    """(Z, clases, TAMANO, TAMANO) -> etiquetas (Z, H, W) en la grilla nativa."""
+    return A.a_nativo(probs, geometria).argmax(1).astype(np.uint8)
 
 
-def procesar_paciente(p: A.Paciente, modelos, device) -> Tuple[dict, dict]:
-    fila = {"pid": p.pid, "split": p.split, "grupo": p.grupo, "sc": p.superficie_corporal}
-    finales, gts, geos, por_vista = {}, {}, {}, {}
-    for fase in A.FASES:
-        img, gt, esp = A.cargar_fase(p, fase)
-        cortes, _, geo = A.preparar_volumen(img, None, esp)
-        probs = [probabilidades_tta(m, cortes, device) for m in modelos]  # [M](V, Z, C, h, w)
-        finales[fase] = mascara_nativa(np.mean([pm.mean(0) for pm in probs], axis=0), geo)
-        por_vista[fase] = [[mascara_nativa(pv, geo) for pv in pm] for pm in probs]  # [M][V]
-        gts[fase], geos[fase] = np.moveaxis(gt, -1, 0), geo
-
-    esp = geos["ED"].espaciado
-    pred = biomarcadores(finales["ED"], finales["ES"], esp, p.superficie_corporal)
-    real = biomarcadores(gts["ED"], gts["ES"], esp, p.superficie_corporal)
-    fila.update({f"pred_{n}": pred[n] for n in NOMBRES})
-    fila.update({f"real_{n}": real[n] for n in NOMBRES})
-
-    # incertidumbre: desviacion entre las 8 vistas de cada modelo, promediada entre modelos
-    stds = {n: [] for n in NOMBRES}
-    for m in range(len(modelos)):
-        vistas = [biomarcadores(fd, fs, esp, p.superficie_corporal)
-                  for fd, fs in zip(por_vista["ED"][m], por_vista["ES"][m])]
-        for n in NOMBRES:
-            stds[n].append(np.nanstd([v[n] for v in vistas]))
-    fila.update({f"std_{n}": float(np.mean(s)) for n, s in stds.items()})
+def procesar_paciente(paciente, modelos, device):
+    """Devuelve (fila para el csv, mascaras finales por fase)."""
+    sc = paciente.superficie_corporal
+    fila = {"pid": paciente.pid, "split": paciente.split, "grupo": paciente.grupo, "sc": sc}
+    finales, gts, geometrias = {}, {}, {}
+    mascaras_por_vista = {}  # mascaras_por_vista[fase][modelo][vista]
 
     for fase in A.FASES:
-        for nombre, c in CLASES.items():
-            dice, iou = dice_y_iou(finales[fase], gts[fase], c)
-            fila[f"dice_{nombre}_{fase}"], fila[f"iou_{nombre}_{fase}"] = dice, iou
+        img, gt, espaciado = A.cargar_fase(paciente, fase)
+        cortes, _, geometria = A.preparar_volumen(img, None, espaciado)
+        probs_por_modelo = [probabilidades_tta(model, cortes, device) for model in modelos]
+
+        promedio = np.mean([probs.mean(axis=0) for probs in probs_por_modelo], axis=0)
+        finales[fase] = mascara_nativa(promedio, geometria)
+        gts[fase] = np.moveaxis(gt, -1, 0)
+        geometrias[fase] = geometria
+
+        mascaras_por_vista[fase] = []
+        for probs in probs_por_modelo:
+            mascaras_por_vista[fase].append([mascara_nativa(probs_vista, geometria) for probs_vista in probs])
+
+    espaciado = geometrias["ED"].espaciado
+    pred = biomarcadores(finales["ED"], finales["ES"], espaciado, sc)
+    real = biomarcadores(gts["ED"], gts["ES"], espaciado, sc)
+    for nombre in NOMBRES:
+        fila[f"pred_{nombre}"] = pred[nombre]
+    for nombre in NOMBRES:
+        fila[f"real_{nombre}"] = real[nombre]
+
+    # incertidumbre: desviacion entre vistas de cada modelo, promediada entre modelos
+    stds = {nombre: [] for nombre in NOMBRES}
+    for i_modelo in range(len(modelos)):
+        por_vista = []
+        for fd, fs in zip(mascaras_por_vista["ED"][i_modelo], mascaras_por_vista["ES"][i_modelo]):
+            por_vista.append(biomarcadores(fd, fs, espaciado, sc))
+        for nombre in NOMBRES:
+            stds[nombre].append(np.nanstd([vista[nombre] for vista in por_vista]))
+    for nombre in NOMBRES:
+        fila[f"std_{nombre}"] = float(np.mean(stds[nombre]))
+
+    for fase in A.FASES:
+        for nombre, clase in CLASES.items():
+            dice, iou = dice_y_iou(finales[fase], gts[fase], clase)
+            fila[f"dice_{nombre}_{fase}"] = dice
+            fila[f"iou_{nombre}_{fase}"] = iou
         # metrica del curso: IoU 2D del miocardio, promedio por corte
-        fila[f"iou2d_mio_{fase}"] = float(np.mean(
-            [dice_y_iou(pc, gc, A.MIOCARDIO)[1] for pc, gc in zip(finales[fase], gts[fase])]))
+        ious = [dice_y_iou(pred_corte, gt_corte, A.MIOCARDIO)[1]
+                for pred_corte, gt_corte in zip(finales[fase], gts[fase])]
+        fila[f"iou2d_mio_{fase}"] = float(np.mean(ious))
     return fila, finales
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description="Inferencia ACDC con TTA y biomarcadores")
-    ap.add_argument("--modelos", type=str, default="outputs/acdc")
-    ap.add_argument("--k", type=int, default=5)
-    ap.add_argument("--out", type=str, default="outputs/acdc")
-    args = ap.parse_args()
+def main():
+    parser = argparse.ArgumentParser(description="Inferencia del ACDC con TTA y biomarcadores")
+    parser.add_argument("--modelos", default="outputs/acdc")
+    parser.add_argument("--k", type=int, default=5)
+    parser.add_argument("--out", default="outputs/acdc")
+    args = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     modelos = []
-    for f in range(args.k):
-        model, ck = cargar_modelo(Path(args.modelos) / f"fold{f}" / "model.pt", device)
+    for fold in range(args.k):
+        model, checkpoint = cargar_modelo(Path(args.modelos) / f"fold{fold}" / "model.pt", device)
         # otro k u otro pliegue le daria a un paciente un modelo que si lo vio
-        if (ck["fold"], ck["k"]) != (f, args.k):
-            raise ValueError(f"fold{f}/model.pt es del pliegue {ck['fold']} de {ck['k']}, "
-                             f"se esperaba {f} de {args.k}")
+        if checkpoint["fold"] != fold or checkpoint["k"] != args.k:
+            raise ValueError(f"fold{fold}/model.pt es del pliegue {checkpoint['fold']} de {checkpoint['k']}")
         modelos.append(model)
-    pliegue = A.pliegues_por_paciente(A.listar_pacientes(split="training"), k=args.k)
+
+    pliegues = A.pliegues_por_paciente(A.listar_pacientes(split="training"), k=args.k)
     out = Path(args.out)
     (out / "mascaras").mkdir(parents=True, exist_ok=True)
 
     filas = []
-    for p in A.listar_pacientes():
-        if p.split == "training":
-            f = pliegue[p.pid]
-            fila, finales = procesar_paciente(p, [modelos[f]], device)
-            fila["fold"] = f
+    for paciente in A.listar_pacientes():
+        if paciente.split == "training":
+            fold = pliegues[paciente.pid]
+            fila, finales = procesar_paciente(paciente, [modelos[fold]], device)
         else:
-            fila, finales = procesar_paciente(p, modelos, device)
-            fila["fold"] = -1
-        np.savez_compressed(out / "mascaras" / f"{p.pid}.npz", ED=finales["ED"], ES=finales["ES"])
+            fold = -1
+            fila, finales = procesar_paciente(paciente, modelos, device)
+        fila["fold"] = fold
+        np.savez_compressed(out / "mascaras" / f"{paciente.pid}.npz", ED=finales["ED"], ES=finales["ES"])
         filas.append(fila)
-        print(f"{p.pid} {p.split:8s} {p.grupo:4s} dice mio={fila['dice_mio_ED']:.3f}/{fila['dice_mio_ES']:.3f} "
-              f"FE VI pred={fila['pred_fe_vi']:5.1f} real={fila['real_fe_vi']:5.1f} "
-              f"(+-{fila['std_fe_vi']:.1f})")
+        print(f"{paciente.pid} {paciente.split:8s} {paciente.grupo:4s} "
+              f"dice mio={fila['dice_mio_ED']:.3f}/{fila['dice_mio_ES']:.3f} "
+              f"FE VI pred={fila['pred_fe_vi']:5.1f} real={fila['real_fe_vi']:5.1f} (+-{fila['std_fe_vi']:.1f})")
 
-    columnas = list(filas[0].keys())
-    with open(out / "pacientes.csv", "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=columnas)
-        w.writeheader()
-        w.writerows(filas)
+    pd.DataFrame(filas).to_csv(out / "pacientes.csv", index=False)
     print(f"Guardado {out / 'pacientes.csv'} ({len(filas)} pacientes)")
 
 

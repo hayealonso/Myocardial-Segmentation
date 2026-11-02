@@ -1,72 +1,46 @@
 """
-Pipeline de datos para segmentacion de miocardio (ACDC + York).
+Datos de la etapa 1: carga los .npy de ACDC + York y arma los DataLoaders.
 
-Responsabilidades de este modulo:
-  1. Cargar los .npy (imgs / annot) de train / val / test.
-  2. Binarizar las mascaras: clase 1 (miocardio) -> 1, clases 0 y 2
-     (fondo y endocardio del LV) -> 0.
-  3. Normalizar las imagenes (uint8 [0,255] -> float32 [0,1], luego
-     estandarizacion con media/std calculadas SOLO en train).
-  4. Exponer un torch.utils.data.Dataset con aumentacion de datos
-     opcional (flips / rotaciones de a 90) para el set de train.
-
-Uso rapido:
-    from cardiac_dataset import load_splits, CardiacDataset, get_dataloaders
+Las mascaras traen 0 fondo, 1 miocardio y 2 cavidad del VI; solo el miocardio
+queda como 1. Las imagenes se normalizan con la media y el std de train.
 
     data = load_splits("cardiac_data")
     train_loader, val_loader, test_loader = get_dataloaders(data, batch_size=16)
-
-    # solo test, con los stats guardados en el checkpoint (no necesita train)
-    stats = {"mean": ckpt["mean"], "std": ckpt["std"]}
-    data = load_splits("cardiac_data", stats=stats, splits=("test",))
 """
 
-from __future__ import annotations
-
 import os
+import sys
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset
 
-# torch se importa adentro de las funciones: el pipeline de numpy funciona sin el.
-
-
-MYOCARDIUM_LABEL = 1  # clase de interes en <split>_annot.npy
+MYOCARDIUM_LABEL = 1
 SPLITS = ("train", "val", "test")
+
 
 @dataclass
 class SplitData:
-    images: np.ndarray  # float32, (N, H, W), normalizado
-    masks: np.ndarray   # uint8,   (N, H, W), valores en {0, 1} (1 = miocardio)
+    images: np.ndarray  # float32 (N, H, W), normalizado
+    masks: np.ndarray   # uint8 (N, H, W), 1 = miocardio
 
 
-def _binarize_mask(annot: np.ndarray) -> np.ndarray:
-    """Colapsa la mascara de 3 clases {0: fondo, 1: miocardio, 2: endocardio}
-    a una mascara binaria {0: fondo/endocardio, 1: miocardio}."""
+def _binarize_mask(annot):
     return (annot == MYOCARDIUM_LABEL).astype(np.uint8)
 
 
-def _normalize_images(imgs_uint8: np.ndarray, mean: float, std: float) -> np.ndarray:
-    """uint8 [0,255] -> float32 [0,1] -> estandarizado con (mean, std) de train."""
+def _normalize_images(imgs_uint8, mean, std):
     imgs = imgs_uint8.astype(np.float32) / 255.0
     return (imgs - mean) / (std + 1e-8)
 
 
-def load_splits(
-    data_dir: str,
-    stats: Optional[Dict[str, float]] = None,
-    splits: Sequence[str] = SPLITS,
-) -> Dict[str, SplitData]:
-    """Carga y preprocesa los splits pedidos (por defecto train/val/test).
+def load_splits(data_dir, stats=None, splits=SPLITS):
+    """Carga los splits pedidos. Devuelve {split: SplitData, "_stats": {"mean", "std"}}.
 
-    La media y el std usados para estandarizar se calculan UNICAMENTE
-    sobre el split de train (buena practica: val/test no deben influir
-    en el preprocesamiento) y se reutilizan para todos los splits.
-
-    stats: {"mean", "std"} ya calculados en train, por ejemplo los que guarda
-    el checkpoint. Si se dan, no se recalcula nada y train no hace falta: es lo
-    que permite evaluar test con exactamente la normalizacion del entrenamiento.
+    stats: media y std de train ya calculados (los guarda el checkpoint). Con
+    ellos se puede evaluar test sin tener train en disco.
     """
     if stats is None and "train" not in splits:
         raise ValueError("sin `stats` hace falta el split de train para calcularlos")
@@ -79,58 +53,43 @@ def load_splits(
         raw[split] = (imgs, annot)
 
     if stats is None:
-        train_imgs_uint8, _ = raw["train"]
-        # float de python y no np.float32: asi el checkpoint carga con weights_only=True
-        train_float = train_imgs_uint8.astype(np.float32)
-        mean = float(train_float.mean() / 255.0)
-        std = float(train_float.std() / 255.0)
+        train_imgs = raw["train"][0].astype(np.float32)
+        # float de python: np.float32 no carga con weights_only=True
+        mean = float(train_imgs.mean() / 255.0)
+        std = float(train_imgs.std() / 255.0)
     else:
         mean, std = float(stats["mean"]), float(stats["std"])
 
-    data: Dict[str, SplitData] = {}
-    for split, (imgs_uint8, annot) in raw.items():
-        norm_imgs = _normalize_images(imgs_uint8, mean, std)
-        bin_masks = _binarize_mask(annot)
-        data[split] = SplitData(images=norm_imgs, masks=bin_masks)
-
-    data["_stats"] = {"mean": mean, "std": std}  # type: ignore[assignment]
+    data = {}
+    for split, (imgs, annot) in raw.items():
+        data[split] = SplitData(images=_normalize_images(imgs, mean, std), masks=_binarize_mask(annot))
+    data["_stats"] = {"mean": mean, "std": std}
     return data
 
 
-def class_balance(masks: np.ndarray) -> Tuple[float, float]:
-    """Fraccion de pixeles de fondo vs miocardio (util para saber si conviene
-    ponderar la loss / usar Dice o Focal loss por el desbalance de clases)."""
+def class_balance(masks):
+    """Fraccion de pixeles de fondo y de miocardio."""
     total = masks.size
-    fg = masks.sum()
-    return (total - fg) / total, fg / total
+    miocardio = masks.sum()
+    return (total - miocardio) / total, miocardio / total
 
 
-class CardiacDataset:
-    """torch.utils.data.Dataset para el problema de segmentacion binaria.
+class CardiacDataset(Dataset):
+    """Devuelve image (1, H, W) y mask (1, H, W), ambos float32.
 
-    Devuelve tensores:
-        image: (1, H, W) float32
-        mask:  (1, H, W) float32  (0/1)
-
-    Augmentation (solo si augment=True, pensado para el split de train):
-      - flip horizontal / vertical aleatorio
-      - rotacion aleatoria en multiplos de 90 grados
-    Estas transformaciones no distorsionan la imagen (no hay interpolacion),
-    por lo que la mascara se transforma exactamente igual que la imagen.
+    Con augment=True aplica flips y rotaciones de 90 grados, iguales en imagen y mascara.
     """
 
-    def __init__(self, split_data: SplitData, augment: bool = False, img_size: int | None = None):
+    def __init__(self, split_data, augment=False, img_size=None):
         self.images = split_data.images
         self.masks = split_data.masks
         self.augment = augment
-        self.img_size = img_size  # si se da, redimensiona (ej. 128) para entrenar mas rapido en CPU
+        self.img_size = img_size
 
-    def __len__(self) -> int:
+    def __len__(self):
         return len(self.images)
 
-    def __getitem__(self, idx: int):
-        import torch
-
+    def __getitem__(self, idx):
         img = self.images[idx].copy()
         mask = self.masks[idx].copy()
 
@@ -146,38 +105,21 @@ class CardiacDataset:
                 img = np.rot90(img, k).copy()
                 mask = np.rot90(mask, k).copy()
 
-        img_t = torch.from_numpy(img).float().unsqueeze(0)   # (1,H,W)
-        mask_t = torch.from_numpy(mask).float().unsqueeze(0)  # (1,H,W)
+        img_t = torch.from_numpy(img).float().unsqueeze(0)
+        mask_t = torch.from_numpy(mask).float().unsqueeze(0)
 
         if self.img_size is not None and self.img_size != img_t.shape[-1]:
-            import torch.nn.functional as F
-            img_t = F.interpolate(
-                img_t.unsqueeze(0), size=(self.img_size, self.img_size),
-                mode="bilinear", align_corners=False,
-            ).squeeze(0)
-            # nearest evita valores intermedios, pero corre la mascara medio pixel respecto de
-            # la imagen. outputs/best_model.pt aprendio ese desfase: corregirlo exige reentrenar.
-            mask_t = F.interpolate(
-                mask_t.unsqueeze(0), size=(self.img_size, self.img_size), mode="nearest",
-            ).squeeze(0)
+            size = (self.img_size, self.img_size)
+            img_t = F.interpolate(img_t.unsqueeze(0), size=size, mode="bilinear", align_corners=False).squeeze(0)
+            # nearest corre la mascara medio pixel respecto de la imagen. best_model.pt
+            # aprendio ese desfase: cambiarlo a nearest-exact exige reentrenar.
+            mask_t = F.interpolate(mask_t.unsqueeze(0), size=size, mode="nearest").squeeze(0)
 
         return img_t, mask_t
 
 
-def get_dataloaders(
-    data: Dict[str, SplitData],
-    batch_size: int = 16,
-    num_workers: int = 0,
-    img_size: int | None = None,
-):
-    """Arma los 3 DataLoaders (train con augmentation + shuffle, val/test sin).
-
-    img_size: si se especifica (ej. 128), redimensiona las imagenes/mascaras
-    a ese tamano cuadrado. Util para entrenar mucho mas rapido en CPU;
-    None mantiene el tamano original (256x256).
-    """
-    from torch.utils.data import DataLoader
-
+def get_dataloaders(data, batch_size=16, num_workers=0, img_size=None):
+    """Train con aumentacion y shuffle; val y test sin ninguno de los dos."""
     train_ds = CardiacDataset(data["train"], augment=True, img_size=img_size)
     val_ds = CardiacDataset(data["val"], augment=False, img_size=img_size)
     test_ds = CardiacDataset(data["test"], augment=False, img_size=img_size)
@@ -189,14 +131,9 @@ def get_dataloaders(
 
 
 if __name__ == "__main__":
-    import sys
-
     data_dir = sys.argv[1] if len(sys.argv) > 1 else "cardiac_data"
     data = load_splits(data_dir)
-    for split in ("train", "val", "test"):
-        sd = data[split]  # type: ignore[index]
-        bg, fg = class_balance(sd.masks)
-        print(f"{split:5s} -> imgs {sd.images.shape} {sd.images.dtype} | "
-              f"masks {sd.masks.shape} {sd.masks.dtype} | "
-              f"bg={bg:.3%} fg(miocardio)={fg:.3%}")
-    print("stats (mean/std de train, usados para estandarizar todo):", data["_stats"])
+    for split in SPLITS:
+        fondo, miocardio = class_balance(data[split].masks)
+        print(f"{split:5s}: {data[split].images.shape} fondo={fondo:.3%} miocardio={miocardio:.3%}")
+    print("media y std de train:", data["_stats"])

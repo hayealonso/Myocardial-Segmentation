@@ -66,7 +66,7 @@ def test_binarizacion_deja_solo_el_miocardio():
     """Clase 1 (miocardio) -> 1; fondo (0) y cavidad del LV (2) -> 0.
 
     Si la cavidad quedara como positivo, el modelo aprenderia a segmentar el
-    ventriculo completo: entrena sin error, el IoU contra esas mascaras sube, y
+    ventriculo completo: el IoU contra esas mascaras sube, y
     el resultado mide otra estructura. data_description.txt fija 1 = miocardio.
     """
     assert MYOCARDIUM_LABEL == 1
@@ -106,7 +106,7 @@ def test_normalizacion_usa_solo_estadisticos_de_train(tmp_path):
 def test_stats_guardados_reproducen_la_normalizacion(tmp_path):
     """Evaluar test con los stats del checkpoint debe dar exactamente lo mismo
     que recalcularlos desde train: si no, la evaluacion sin train en disco
-    normaliza distinto que el entrenamiento y el modelo rinde peor sin avisar."""
+    normaliza distinto que el entrenamiento y el modelo rinde peor."""
     _escribir_splits(tmp_path)
     completo = load_splits(str(tmp_path))
     solo_test = load_splits(str(tmp_path), stats=completo["_stats"], splits=("test",))
@@ -173,7 +173,7 @@ def test_resize_mantiene_la_mascara_binaria_y_alineada(img_size):
     Con bilinear en la mascara aparecen valores intermedios (0.5) que la BCE
     acepta sin quejarse como si fueran etiquetas blandas. Y si imagen y mascara
     no quedaran alineadas tras el resize, el borde del miocardio quedaria
-    corrido un pixel: el IoU baja un poco y nada lo delata.
+    corrido un pixel: el IoU baja un poco.
     """
     img = np.zeros((1, 256, 256), dtype=np.float32)
     img[0, 64:128, 32:96] = 1.0
@@ -371,7 +371,7 @@ def test_scheduler_maximiza_el_iou():
     """ReduceLROnPlateau observa el IoU de val, que se maximiza.
 
     Con mode="min" el lr se reduciria cada vez que el modelo mejora: entrena
-    sin error, solo que se estanca antes. Mientras el IoU sube el lr no se toca;
+    el entrenamiento se estanca antes. Mientras el IoU sube el lr no se toca;
     cuando se estanca, baja.
     """
     opt, sch = train.build_optimizer(nn.Linear(1, 1), lr=1e-3)
@@ -438,7 +438,7 @@ def test_datos_reales_tienen_el_formato_documentado(split):
     """Lo que dice data_description.txt: (N, 256, 256) uint8, mascara en {0, 1, 2}.
 
     Una version de los datos con otra codificacion (por ejemplo 0/255, o la
-    cavidad como 1) se binarizaria sin error y entrenaria contra otra cosa.
+    cavidad como 1) se binarizaria igual y entrenaria contra otra cosa.
     """
     if split not in _splits_en_disco():
         pytest.skip(f"{split} no esta en {DATA}")
@@ -455,10 +455,12 @@ def test_datos_reales_tienen_el_formato_documentado(split):
 
 @pytest.mark.datos
 def test_no_hay_imagenes_repetidas_entre_splits():
-    """data_description.txt asegura que los splits no comparten sujetos.
+    """Una imagen de train repetida en val o test seria fuga: el IoU saldria optimista.
 
-    No hay ids de sujeto para verificarlo, pero una imagen identica en dos
-    splits es fuga segura: el IoU de test sale optimista y no hay error.
+    Entre val y test hay un caso conocido: 16 imagenes consecutivas (val 58-73, test 32-47)
+    con mascaras distintas, que parecen un sujeto anotado dos veces. No afecta el resultado:
+    sin ellas, el IoU de test a 256 pasa de 0.7373 a 0.7374. Si ese numero cambia, los datos
+    cambiaron.
     """
     presentes = _splits_en_disco()
     if len(presentes) < 2:
@@ -466,18 +468,19 @@ def test_no_hay_imagenes_repetidas_entre_splits():
     hashes = {}
     for split in presentes:
         imgs = np.load(DATA / f"{split}_imgs.npy", mmap_mode="r")
-        hashes[split] = {hashlib.sha1(np.ascontiguousarray(im).tobytes()).hexdigest() for im in imgs}
+        hashes[split] = {hashlib.sha1(im.tobytes()).hexdigest() for im in imgs}
     for i, a in enumerate(presentes):
         for b in presentes[i + 1:]:
             comunes = hashes[a] & hashes[b]
-            assert not comunes, f"{len(comunes)} imagenes repetidas entre {a} y {b}"
+            esperadas = 16 if (a, b) == ("val", "test") else 0
+            assert len(comunes) == esperadas, f"{len(comunes)} imagenes repetidas entre {a} y {b}"
 
 
 @pytest.mark.datos
 def test_checkpoint_coincide_con_los_resultados_guardados():
     """best_model.pt, history.json y test_results.json deben ser de la misma corrida.
 
-    Un checkpoint de otra corrida (u otro img_size) se carga sin error y produce
+    Un checkpoint de otra corrida (u otro img_size) se carga igual y produce
     numeros que no coinciden con los que se reportan.
     """
     ck_path, hist_path, res_path = (
