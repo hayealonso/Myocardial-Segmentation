@@ -521,19 +521,22 @@ def test_checkpoint_reproduce_su_iou_de_validacion():
 
     Es el test de regresion de todo el pipeline de inferencia: cualquier cambio
     en normalizacion, binarizacion, resize, umbral o metrica mueve este numero,
-    aunque cada pieza por separado siga pareciendo correcta.
+    aunque cada pieza por separado siga pareciendo correcta. El modelo se entreno en
+    GPU: en CPU el redondeo cambia unos pocos pixeles (2e-6 en el IoU).
     """
     ck_path = CKPT_DIR / "best_model.pt"
     if "val" not in _splits_en_disco() or not ck_path.exists():
         pytest.skip("faltan cardiac_data/val_* o outputs/best_model.pt")
-    model, ck = load_checkpoint(ck_path)
+    hay_gpu = torch.cuda.is_available()
+    device = "cuda" if hay_gpu else "cpu"
+    model, ck = load_checkpoint(ck_path, map_location=device)
     if "mean" not in ck:
         pytest.skip("checkpoint antiguo sin stats de normalizacion")
 
     data = load_splits(str(DATA), stats={"mean": ck["mean"], "std": ck["std"]}, splits=("val",))
     loader = DataLoader(CardiacDataset(data["val"], img_size=ck["img_size"]), batch_size=16)
-    _, val_iou = train.run_epoch(model, loader, BCEDiceLoss(), "cpu")
-    assert val_iou == pytest.approx(ck["val_iou"], abs=1e-6)
+    _, val_iou = train.run_epoch(model, loader, BCEDiceLoss(), device)
+    assert val_iou == pytest.approx(ck["val_iou"], abs=1e-6 if hay_gpu else 1e-5)
 
 
 # Visualizacion
