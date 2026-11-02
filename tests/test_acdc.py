@@ -13,8 +13,8 @@ import numpy as np
 import pytest
 import torch
 
-import acdc_data as A
-from losses import CEDiceLoss, dice_multiclase_loss, dice_y_iou
+from miocardio import acdc_data as A
+from miocardio.losses import CEDiceLoss, dice_multiclase_loss, dice_y_iou
 
 ROOT=Path(__file__).resolve().parents[1]
 ACDC=ROOT/"data"/"ACDC"/"database"
@@ -267,7 +267,7 @@ def test_modelo_de_otra_grilla_no_se_carga(tmp_path):
     """Un modelo entrenado a otra resolucion produce mascaras plausibles sobre
     la grilla actual: el error solo se ve como volumenes corridos."""
     import train_acdc
-    from model import UNet
+    from miocardio.model import UNet
 
     path=tmp_path/"model.pt"
     ck={"model_state": UNet(out_channels=A.N_CLASES, base_channels=2).state_dict(),

@@ -12,7 +12,7 @@ RV el VD dilatado, MINF FE baja y poco engrosamiento, HCM la pared gruesa y masa
 import numpy as np
 from scipy import ndimage
 
-from acdc_data import MIOCARDIO, VD, VI
+from miocardio.acdc_data import MIOCARDIO, VD, VI
 
 DENSIDAD_MIOCARDIO=1.05  #g/ml
 

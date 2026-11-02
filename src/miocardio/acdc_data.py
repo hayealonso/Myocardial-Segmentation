@@ -1,13 +1,13 @@
 """
 Datos de la etapa 2: ACDC original (150 pacientes, NIfTI).
 
-Etiquetas del ACDC: 0 fondo, 1 VD, 2 miocardio, 3 VI. En cardiac_data/*.npy el 1 es
+Etiquetas del ACDC: 0 fondo, 1 VD, 2 miocardio, 3 VI. En data/cardiac_data/*.npy el 1 es
 miocardio, asi que no se pueden mezclar.
 
 Cada volumen se normaliza, se remuestrea a 1.5 mm por pixel y se recorta a 192x192.
 `a_nativo` deshace ese camino para medir volumenes con el espaciado real del paciente.
 
-    python acdc_data.py  #construye la cache y resume los datos
+    python -m miocardio.acdc_data  #construye la cache y resume los datos
 """
 
 import sys

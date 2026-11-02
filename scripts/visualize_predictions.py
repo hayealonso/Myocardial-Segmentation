@@ -1,7 +1,7 @@
 """
 Dibuja las segmentaciones de la etapa 1 sobre val o test.
 
-    python visualize_predictions.py cardiac_data --split val --orden peores --individuales
+    python scripts/visualize_predictions.py data/cardiac_data --split val --orden peores --individuales
 
 Por imagen: original, mascara real, prediccion y errores (verde = acierto,
 rojo = falso positivo, azul = falso negativo). Guarda en --out-dir la grilla
@@ -16,9 +16,9 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from cardiac_dataset import CardiacDataset, load_splits
-from losses import iou_score
-from model import load_checkpoint
+from miocardio.cardiac_dataset import CardiacDataset, load_splits
+from miocardio.losses import iou_score
+from miocardio.model import load_checkpoint
 
 #RGBA
 COLOR_TP=(0.0, 1.0, 0.0, 0.6)

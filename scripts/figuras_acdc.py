@@ -17,7 +17,7 @@ import pandas as pd
 from matplotlib.colors import to_rgb
 from matplotlib.patches import Patch
 
-import acdc_data as A
+from miocardio import acdc_data as A
 
 AZUL, NARANJA, AQUA="#2a78d6", "#eb6834", "#1baf7a"
 TINTA, TINTA_2, GRILLA="#0b0b0b", "#52514e", "#e4e3df"

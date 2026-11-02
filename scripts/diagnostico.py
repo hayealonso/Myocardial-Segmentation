@@ -1,7 +1,7 @@
 """
 Predice el grupo de cada paciente del ACDC a partir de sus biomarcadores.
 
-    python diagnostico.py  #despues de inferir_acdc.py
+    python scripts/diagnostico.py  #despues de inferir_acdc.py
 
 Se evalua con dos fuentes: las mascaras predichas (el sistema real) y las de los expertos
 (el oraculo, la cota superior). El modelo se elige con validacion cruzada en training y
@@ -24,8 +24,8 @@ from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold, cr
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from acdc_data import GRUPOS
-from biomarcadores import NOMBRES
+from miocardio.acdc_data import GRUPOS
+from miocardio.biomarcadores import NOMBRES
 
 SEMILLA=0
 

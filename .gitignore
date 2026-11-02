@@ -6,7 +6,6 @@ __pycache__/
 .claude/tmp/
 
 # datos (ACDC + York): publicos, pero se obtienen de sus fuentes, no de este repo
-cardiac_data/
 data/
 *.nii
 *.nii.gz

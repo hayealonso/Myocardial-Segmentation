@@ -1,7 +1,7 @@
 """
 Entrena la U-Net de la etapa 1 para segmentar el miocardio.
 
-    python train.py cardiac_data --epochs 25 --img-size 256 --base-channels 16
+    python scripts/train.py data/cardiac_data --epochs 25 --img-size 256 --base-channels 16
 
 Guarda en --out-dir el mejor modelo segun el IoU de val y al final lo evalua en
 test. Para una prueba rapida usa otro --out-dir: si no, sobrescribe outputs/best_model.pt.
@@ -15,9 +15,9 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from cardiac_dataset import get_dataloaders, load_splits
-from losses import BCEDiceLoss, iou_score
-from model import UNet, count_parameters, load_checkpoint, save_checkpoint
+from miocardio.cardiac_dataset import get_dataloaders, load_splits
+from miocardio.losses import BCEDiceLoss, iou_score
+from miocardio.model import UNet, count_parameters, load_checkpoint, save_checkpoint
 
 
 def parse_args():

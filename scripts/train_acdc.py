@@ -1,7 +1,7 @@
 """
 Entrena la U-Net de 4 clases (fondo, VD, miocardio, VI) sobre un pliegue del ACDC.
 
-    python train_acdc.py --fold 0
+    python scripts/train_acdc.py --fold 0
 
 Validacion cruzada de 5 pliegues por paciente sobre los 100 de training. Las epocas
 son fijas y se guarda el ultimo modelo: el pliegue retenido solo se monitorea, porque
@@ -20,12 +20,12 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from acdc_data import (
+from miocardio.acdc_data import (
     ESPACIADO_OBJETIVO, N_CLASES, NOMBRES_CLASES, TAMANO,
     CortesACDC, cargar_cache, listar_pacientes, pliegues_por_paciente,
 )
-from losses import CEDiceLoss
-from model import UNet, count_parameters, load_checkpoint
+from miocardio.losses import CEDiceLoss
+from miocardio.model import UNet, count_parameters, load_checkpoint
 
 
 def parse_args():

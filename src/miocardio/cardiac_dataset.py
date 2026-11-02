@@ -4,7 +4,7 @@ Datos de la etapa 1: carga los .npy de ACDC + York y arma los DataLoaders.
 Las mascaras traen 0 fondo, 1 miocardio y 2 cavidad del VI; solo el miocardio
 queda como 1. Las imagenes se normalizan con la media y el std de train.
 
-    data=load_splits("cardiac_data")
+    data=load_splits("data/cardiac_data")
     train_loader, val_loader, test_loader=get_dataloaders(data, batch_size=16)
 """
 
@@ -132,7 +132,7 @@ def get_dataloaders(data, batch_size=16, num_workers=0, img_size=None):
 
 
 if __name__=="__main__":
-    data_dir=sys.argv[1] if len(sys.argv)>1 else "cardiac_data"
+    data_dir=sys.argv[1] if len(sys.argv)>1 else "data/cardiac_data"
     data=load_splits(data_dir)
     for split in SPLITS:
         fondo, miocardio=class_balance(data[split].masks)

@@ -1,7 +1,7 @@
 """Invariantes del pipeline de segmentacion de miocardio.
 
 Cada modulo trae ademas su propia verificacion de shapes en `__main__`
-(`uv run python model.py`, `uv run python losses.py`). Lo que hay aca es lo
+(`uv run python -m miocardio.model`, `uv run python -m miocardio.losses`). Lo que hay aca es lo
 otro: los errores que no lanzan excepcion ni cambian ninguna dimension, y que
 por eso solo aparecen como "el IoU bajo un poco" o "el modelo no mejora".
 
@@ -13,7 +13,7 @@ ejecuta el script; una mascara rotada distinto que su imagen, no.
     uv run pytest -q -m "not slow"            # sin los que entrenan (~2 s)
     uv run pytest -q -m "not slow and not datos"   # sin datos privados ni checkpoint
 
-Los tests marcados `datos` usan cardiac_data/ y outputs/, que no estan en el
+Los tests marcados `datos` usan data/cardiac_data/ y outputs/, que no estan en el
 repo (datos privados). Si no estan en disco se saltan, no fallan.
 """
 
@@ -31,7 +31,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 
 import train
-from cardiac_dataset import (
+from miocardio.cardiac_dataset import (
     MYOCARDIUM_LABEL,
     SPLITS,
     CardiacDataset,
@@ -40,11 +40,11 @@ from cardiac_dataset import (
     get_dataloaders,
     load_splits,
 )
-from losses import BCEDiceLoss, dice_loss, iou_score
-from model import UNet, load_checkpoint, save_checkpoint
+from miocardio.losses import BCEDiceLoss, dice_loss, iou_score
+from miocardio.model import UNet, load_checkpoint, save_checkpoint
 
 ROOT=Path(__file__).resolve().parents[1]
-DATA=ROOT/"cardiac_data"
+DATA=ROOT/"data"/"cardiac_data"
 CKPT_DIR=ROOT/"outputs"
 
 
@@ -526,7 +526,7 @@ def test_checkpoint_reproduce_su_iou_de_validacion():
     """
     ck_path=CKPT_DIR/"best_model.pt"
     if "val" not in _splits_en_disco() or not ck_path.exists():
-        pytest.skip("faltan cardiac_data/val_* o outputs/best_model.pt")
+        pytest.skip("faltan data/cardiac_data/val_* o outputs/best_model.pt")
     hay_gpu=torch.cuda.is_available()
     device="cuda" if hay_gpu else "cpu"
     model, ck=load_checkpoint(ck_path, map_location=device)
@@ -571,7 +571,7 @@ def test_mapa_de_errores_colorea_cada_caso_y_deja_el_fondo_transparente():
     assert capa[0, 1, 3]==0.0
 
 
-@pytest.mark.parametrize("notebook", ["EDA_miocardio.ipynb", "resultados_acdc.ipynb"])
+@pytest.mark.parametrize("notebook", ["notebooks/EDA_miocardio.ipynb", "notebooks/resultados_acdc.ipynb"])
 def test_lo_que_se_va_a_commitear_no_trae_salidas(notebook):
     """Las salidas de los notebooks traen imagenes de pacientes y el repo es
     publico. Se revisa la version preparada para commit (el indice de git): correr

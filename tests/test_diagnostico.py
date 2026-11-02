@@ -13,8 +13,8 @@ import pytest
 
 import diagnostico as D
 import seguridad as S
-from acdc_data import GRUPOS
-from biomarcadores import NOMBRES
+from miocardio.acdc_data import GRUPOS
+from miocardio.biomarcadores import NOMBRES
 
 
 def _df_sintetico(seed=0, n_tr=20, n_te=10):

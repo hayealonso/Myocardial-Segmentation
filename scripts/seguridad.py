@@ -1,7 +1,7 @@
 """
 Marca a los pacientes cuya prediccion es dudosa.
 
-    python seguridad.py  #despues de inferir_acdc.py y diagnostico.py
+    python scripts/seguridad.py  #despues de inferir_acdc.py y diagnostico.py
 
 Dos senales que no necesitan conocer la respuesta:
   - duda de segmentacion: cuanto cambian los biomarcadores entre las 8 vistas del TTA

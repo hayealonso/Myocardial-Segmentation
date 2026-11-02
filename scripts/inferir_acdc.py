@@ -1,7 +1,7 @@
 """
 Segmenta a los 150 pacientes del ACDC, vuelve a la grilla nativa y mide biomarcadores.
 
-    python inferir_acdc.py  #despues de entrenar los 5 pliegues
+    python scripts/inferir_acdc.py  #despues de entrenar los 5 pliegues
 
 Cada paciente de training lo segmenta el modelo que no lo vio. Los de test, los 5
 modelos promediados. Siempre se promedian las 8 simetrias del cuadrado (TTA), y la
@@ -20,9 +20,9 @@ import numpy as np
 import pandas as pd
 import torch
 
-import acdc_data as A
-from biomarcadores import NOMBRES, biomarcadores
-from losses import dice_y_iou
+from miocardio import acdc_data as A
+from miocardio.biomarcadores import NOMBRES, biomarcadores
+from miocardio.losses import dice_y_iou
 from train_acdc import cargar_modelo
 
 CLASES={"vd": A.VD, "mio": A.MIOCARDIO, "vi": A.VI}

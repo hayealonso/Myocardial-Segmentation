@@ -64,7 +64,7 @@ El módulo de seguridad marcó 6 de 50 pacientes y entre ellos estaban 2 de los 
 
 Este repositorio no incluye datos, modelos ni imágenes de pacientes.
 
-Etapa 1: versión preprocesada de ACDC y York, entregada por el curso. Se copia en `cardiac_data/` como `{train,val,test}_{imgs,annot}.npy`. Son imágenes uint8 de 256×256 (4.564, 502 y 1.240), y las máscaras traen 0 fondo, 1 miocardio y 2 cavidad del VI. El miocardio ocupa cerca del 1,2 % de los píxeles.
+Etapa 1: versión preprocesada de ACDC y York, entregada por el curso. Se copia en `data/cardiac_data/` como `{train,val,test}_{imgs,annot}.npy`. Son imágenes uint8 de 256×256 (4.564, 502 y 1.240), y las máscaras traen 0 fondo, 1 miocardio y 2 cavidad del VI. El miocardio ocupa cerca del 1,2 % de los píxeles.
 
 Etapa 2: [ACDC original](https://humanheart-project.creatis.insa-lyon.fr/database/#collection/637218c173e9f0047faa00fb), en `data/ACDC/database/`. Son 150 pacientes (100 de training y 50 de test), con 30 por grupo: normal (NOR), infarto previo (MINF), miocardiopatía dilatada (DCM), miocardiopatía hipertrófica (HCM) y VD anormal (RV). Cada uno trae imágenes y anotaciones en FD y FS, altura y peso. Las máscaras traen 0 fondo, 1 VD, 2 miocardio y 3 VI. La licencia es CC BY-NC-SA 4.0 y su uso exige citar a Bernard et al. (2018).
 
@@ -119,27 +119,27 @@ uv sync
 Etapa 1:
 
 ```bash
-uv run python train.py cardiac_data --epochs 25 --img-size 256 --base-channels 16
-uv run python visualize_predictions.py cardiac_data --split test --orden peores --individuales
+uv run python scripts/train.py data/cardiac_data --epochs 25 --img-size 256 --base-channels 16
+uv run python scripts/visualize_predictions.py data/cardiac_data --split test --orden peores --individuales
 ```
 
 Etapa 2, en orden:
 
 ```bash
-uv run python acdc_data.py
-for k in 0 1 2 3 4; do uv run python train_acdc.py --fold $k; done
-uv run python inferir_acdc.py
-uv run python diagnostico.py
-uv run python seguridad.py
-uv run python figuras_acdc.py
+uv run python -m miocardio.acdc_data
+for k in 0 1 2 3 4; do uv run python scripts/train_acdc.py --fold $k; done
+uv run python scripts/inferir_acdc.py
+uv run python scripts/diagnostico.py
+uv run python scripts/seguridad.py
+uv run python scripts/figuras_acdc.py
 ```
 
 En una RTX 4050, la etapa 1 tarda unos 20 minutos y cada pliegue de la etapa 2 unos 18. Todo lo que se genera queda en `outputs/`, fuera de git.
 
-Notebooks: `EDA_miocardio.ipynb` explora los datos de la etapa 1 y `resultados_acdc.ipynb` recorre los resultados de la etapa 2 sin reentrenar. En VS Code elige el kernel `.venv`. Sus salidas traen imágenes de pacientes, así que antes de un commit usa "Clear All Outputs". Para verlos como página web:
+Notebooks: `notebooks/EDA_miocardio.ipynb` explora los datos de la etapa 1 y `notebooks/resultados_acdc.ipynb` recorre los resultados de la etapa 2 sin reentrenar. En VS Code elige el kernel `.venv`. Sus salidas traen imágenes de pacientes, así que antes de un commit usa "Clear All Outputs". Para verlos como página web:
 
 ```bash
-uv run jupyter nbconvert --to html --execute resultados_acdc.ipynb --output-dir outputs/notebooks
+uv run jupyter nbconvert --to html --execute notebooks/resultados_acdc.ipynb --output-dir outputs/notebooks
 ```
 
 ## Pruebas
@@ -150,23 +150,30 @@ uv run pytest -q
 
 Vigilan errores que no lanzan excepción pero dan resultados equivocados, por ejemplo una máscara transformada distinto que su imagen, etiquetas mal interpretadas, volúmenes o grosores mal medidos y datos de test filtrados en la selección del clasificador. Las que necesitan datos se saltan si no están en disco.
 
-## Archivos
+## Estructura
 
-| Archivo | Contenido |
-|---|---|
-| `cardiac_dataset.py` | Datos de la etapa 1 |
-| `model.py` | U-Net y checkpoints |
-| `losses.py` | Pérdidas y métricas |
-| `train.py` | Entrenamiento de la etapa 1 |
-| `visualize_predictions.py` | Figuras de la etapa 1 |
-| `acdc_data.py` | Datos de la etapa 2 |
-| `train_acdc.py` | Entrenamiento por pliegue |
-| `inferir_acdc.py` | Segmentación con TTA y biomarcadores por paciente |
-| `biomarcadores.py` | Volúmenes, FE, masa y grosor de pared |
-| `diagnostico.py` | Clasificador de los 5 grupos |
-| `seguridad.py` | Alertas por paciente |
-| `figuras_acdc.py` | Figuras de la etapa 2 |
-| `tests/` | Pruebas |
+```
+src/miocardio/              código que importan los scripts
+  cardiac_dataset.py        datos de la etapa 1
+  acdc_data.py              datos de la etapa 2
+  model.py                  U-Net y checkpoints
+  losses.py                 pérdidas y métricas
+  biomarcadores.py          volúmenes, FE, masa y grosor de pared
+scripts/                    lo que se ejecuta
+  train.py                  entrenamiento de la etapa 1
+  visualize_predictions.py  figuras de la etapa 1
+  train_acdc.py             entrenamiento por pliegue
+  inferir_acdc.py           segmentación con TTA y biomarcadores por paciente
+  diagnostico.py            clasificador de los 5 grupos
+  seguridad.py              alertas por paciente
+  figuras_acdc.py           figuras de la etapa 2
+notebooks/                  exploración y resultados
+tests/                      pruebas
+data/                       datos, fuera de git
+outputs/                    resultados, fuera de git
+```
+
+Los comandos se ejecutan desde la raíz del repositorio.
 
 ## Referencias
 

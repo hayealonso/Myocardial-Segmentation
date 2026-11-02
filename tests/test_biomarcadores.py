@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import torch
 
-import biomarcadores as B
+from miocardio import biomarcadores as B
 from inferir_acdc import deshacer_vista, vistas_d4
 
 
