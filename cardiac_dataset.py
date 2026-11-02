@@ -111,9 +111,10 @@ class CardiacDataset(Dataset):
         if self.img_size is not None and self.img_size != img_t.shape[-1]:
             size = (self.img_size, self.img_size)
             img_t = F.interpolate(img_t.unsqueeze(0), size=size, mode="bilinear", align_corners=False).squeeze(0)
-            # nearest corre la mascara medio pixel respecto de la imagen. best_model.pt
-            # aprendio ese desfase: cambiarlo a nearest-exact exige reentrenar.
-            mask_t = F.interpolate(mask_t.unsqueeze(0), size=size, mode="nearest").squeeze(0)
+            # bilinear + umbral, igual que la imagen. Al reducir a la mitad, nearest y
+            # nearest-exact corren la mascara medio pixel, cada uno hacia un lado.
+            mask_t = F.interpolate(mask_t.unsqueeze(0), size=size, mode="bilinear", align_corners=False).squeeze(0)
+            mask_t = (mask_t >= 0.5).float()
 
         return img_t, mask_t
 

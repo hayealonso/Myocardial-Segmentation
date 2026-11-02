@@ -167,14 +167,9 @@ def test_val_y_test_no_se_aumentan_ni_se_barajan():
 
 
 @pytest.mark.parametrize("img_size", [128, 100])
-def test_resize_mantiene_la_mascara_binaria_y_alineada(img_size):
-    """La mascara se redimensiona con `nearest`, la imagen con `bilinear`.
-
-    Con bilinear en la mascara aparecen valores intermedios (0.5) que la BCE
-    acepta sin quejarse como si fueran etiquetas blandas. Y si imagen y mascara
-    no quedaran alineadas tras el resize, el borde del miocardio quedaria
-    corrido un pixel: el IoU baja un poco.
-    """
+def test_resize_mantiene_la_mascara_binaria(img_size):
+    """Sin umbral, la mascara reducida trae valores intermedios que la BCE acepta
+    como si fueran etiquetas blandas."""
     img = np.zeros((1, 256, 256), dtype=np.float32)
     img[0, 64:128, 32:96] = 1.0
     mask = (img > 0.5).astype(np.uint8)
@@ -183,9 +178,31 @@ def test_resize_mantiene_la_mascara_binaria_y_alineada(img_size):
 
     assert x.shape == m.shape == (1, img_size, img_size)
     assert set(torch.unique(m).tolist()) <= {0.0, 1.0}
-    pred = (x > 0.5).float()
+    pred = (x >= 0.5).float()
     iou = (pred * m).sum() / ((pred + m).clamp(0, 1)).sum()
-    assert iou > 0.95, f"imagen y mascara desalineadas tras el resize (IoU={iou:.3f})"
+    assert iou > 0.95, f"imagen y mascara no coinciden tras el resize (IoU={iou:.3f})"
+
+
+def test_reducir_a_la_mitad_no_corre_la_mascara():
+    """De 256 a 128, nearest y nearest-exact corren la mascara 0.25 px, cada uno hacia
+    un lado. El modelo aprende ese desfase y el IoU a 128 se ve mejor de lo que es: con
+    nearest daba 0.723 en val y solo 0.705 a 256. Un solo bloque no lo muestra, porque
+    el IoU sigue alto; hay que promediar el desplazamiento."""
+    rng = np.random.default_rng(0)
+    yy, xx = np.mgrid[:128, :128]
+    desplazamientos = []
+    for _ in range(50):
+        y0, x0 = rng.integers(20, 150, 2)
+        alto, ancho = rng.integers(21, 80, 2)
+        img = np.zeros((1, 256, 256), dtype=np.float32)
+        img[0, y0:y0 + alto, x0:x0 + ancho] = 1.0
+        ds = CardiacDataset(SplitData(images=img, masks=(img > 0.5).astype(np.uint8)), img_size=128)
+        x, m = ds[0]
+        x, m = x[0].numpy(), m[0].numpy()
+        desplazamientos.append([(m * yy).sum() / m.sum() - (x * yy).sum() / x.sum(),
+                                (m * xx).sum() / m.sum() - (x * xx).sum() / x.sum()])
+    sesgo = np.abs(np.mean(desplazamientos, axis=0)).max()
+    assert sesgo < 0.1, f"la mascara queda corrida {sesgo:.2f} px respecto de la imagen"
 
 
 # Metrica y perdida
@@ -459,8 +476,7 @@ def test_no_hay_imagenes_repetidas_entre_splits():
 
     Entre val y test hay un caso conocido: 16 imagenes consecutivas (val 58-73, test 32-47)
     con mascaras distintas, que parecen un sujeto anotado dos veces. No afecta el resultado:
-    sin ellas, el IoU de test a 256 pasa de 0.7373 a 0.7374. Si ese numero cambia, los datos
-    cambiaron.
+    sin ellas, el IoU de test pasa de 0.7470 a 0.7469. Si cambia la cantidad, cambiaron los datos.
     """
     presentes = _splits_en_disco()
     if len(presentes) < 2:

@@ -11,12 +11,22 @@ El proyecto tiene dos etapas:
 
 ### Etapa 1: miocardio
 
-| Medición | Validación | Test |
-|---|---|---|
-| IoU a 128×128 | 0,723 | 0,748 |
-| IoU a 256×256, la resolución original | 0,705 | 0,737 |
+IoU promedio por imagen, a la resolución original de 256×256:
 
-El valor comparable con la imagen original es el de 256×256. La diferencia viene de un error conocido: al reducir a 128×128 la máscara queda corrida medio píxel respecto de la imagen, y el modelo aprendió ese desfase. Corregirlo exige reentrenar, y todavía no se ha hecho.
+| Validación | Test |
+|---|---|
+| 0,728 | 0,747 |
+
+Una versión anterior entrenaba a 128×128 y reducía la máscara con `nearest`, que la corre medio píxel respecto de la imagen. Esa versión reportaba 0,748 en test medido a 128×128, pero a 256×256 daba 0,737. Con la misma red y la misma semilla, medido a 256×256:
+
+| Entrenamiento | Validación | Test |
+|---|---|---|
+| 128×128, máscara con `nearest` | 0,705 | 0,737 |
+| 128×128, máscara con `nearest-exact` | 0,703 | 0,727 |
+| 128×128, máscara con promedio y umbral | 0,719 | 0,745 |
+| 256×256, sin reducir (el modelo actual) | 0,728 | 0,747 |
+
+Se eligió el de 256×256 por su IoU de validación. Es una corrida por variante, y el IoU de validación salta hasta 0,03 entre épocas, así que las diferencias chicas no son concluyentes.
 
 ### Etapa 2: ACDC, los 50 pacientes del test oficial
 
@@ -63,9 +73,9 @@ Etapa 2: [ACDC original](https://humanheart-project.creatis.insa-lyon.fr/databas
 ### Etapa 1
 
 - Preprocesamiento: la clase 1 pasa a ser el único positivo. Las imágenes se dividen por 255 y se estandarizan con la media y el desvío de train.
-- Modelo: U-Net de 4 niveles con `base_channels=16` (1,9 millones de parámetros), a 128×128.
+- Modelo: U-Net de 4 niveles con `base_channels=16` (1,9 millones de parámetros), a 256×256. Las imágenes no se reducen, así que la máscara no necesita remuestreo.
 - Entrenamiento: BCE + Dice, porque el miocardio es muy minoritario. Adam con tasa 1e-3 y `ReduceLROnPlateau` sobre el IoU de validación, 25 épocas, lotes de 16. La aumentación usa flips y rotaciones de 90°.
-- Selección: se guarda la época con mejor IoU de validación (la 19).
+- Selección: se guarda la época con mejor IoU de validación (la 14).
 
 ### Etapa 2
 
@@ -93,7 +103,7 @@ Hubo contactos menores con test, ninguno cambió una decisión. El tamaño del r
 - Infarto y dilatada se confunden: ambos tienen el VI grande y una FE baja.
 - El umbral de alertas se calibró con un modelo por paciente y en test se aplica a un promedio de 5, lo que probablemente explica que marque 12 % en test y 20 % en training. Ajustarlo ahora sería decidir mirando test.
 - La relación entre la dispersión de la FE y su error real es débil (Spearman 0,23 a 0,37). La alerta ayuda a priorizar qué revisar y no garantiza nada.
-- En los datos de la etapa 1, 16 imágenes consecutivas aparecen en val y en test con máscaras distintas, y parecen un sujeto anotado dos veces. Sin ellas, el IoU de test a 256×256 pasa de 0,7373 a 0,7374. Train no comparte imágenes con val ni con test.
+- En los datos de la etapa 1, 16 imágenes consecutivas aparecen en val y en test con máscaras distintas, y parecen un sujeto anotado dos veces. Sin ellas, el IoU de test pasa de 0,7470 a 0,7469. Train no comparte imágenes con val ni con test.
 - Es un proyecto académico, sin validación clínica.
 
 ## Instalación
@@ -109,7 +119,7 @@ uv sync
 Etapa 1:
 
 ```bash
-uv run python train.py cardiac_data --epochs 25 --img-size 128 --base-channels 16
+uv run python train.py cardiac_data --epochs 25 --img-size 256 --base-channels 16
 uv run python visualize_predictions.py cardiac_data --split test --orden peores --individuales
 ```
 
@@ -124,7 +134,7 @@ uv run python seguridad.py
 uv run python figuras_acdc.py
 ```
 
-Cada pliegue tarda unos 18 minutos en una RTX 4050. Todo lo que se genera queda en `outputs/`, fuera de git.
+En una RTX 4050, la etapa 1 tarda unos 20 minutos y cada pliegue de la etapa 2 unos 18. Todo lo que se genera queda en `outputs/`, fuera de git.
 
 Notebooks: `EDA_miocardio.ipynb` explora los datos de la etapa 1 y `resultados_acdc.ipynb` recorre los resultados de la etapa 2 sin reentrenar. En VS Code elige el kernel `.venv`. Sus salidas traen imágenes de pacientes, así que antes de un commit usa "Clear All Outputs". Para verlos como página web:
 

@@ -1,7 +1,7 @@
 """
 Entrena la U-Net de la etapa 1 para segmentar el miocardio.
 
-    python train.py cardiac_data --epochs 25 --img-size 128 --base-channels 16
+    python train.py cardiac_data --epochs 25 --img-size 256 --base-channels 16
 
 Guarda en --out-dir el mejor modelo segun el IoU de val y al final lo evalua en
 test. Para una prueba rapida usa otro --out-dir: si no, sobrescribe outputs/best_model.pt.
@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--img-size", type=int, default=128, help="256 es el tamano original")
+    parser.add_argument("--img-size", type=int, default=256, help="256 es el tamano original")
     parser.add_argument("--base-channels", type=int, default=16)
     parser.add_argument("--out-dir", default="outputs")
     parser.add_argument("--seed", type=int, default=42)
