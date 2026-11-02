@@ -38,10 +38,6 @@ ESPACIADO_OBJETIVO = 1.5  # mm por pixel en el plano
 TAMANO = 192              # 288 mm; el peor caso del ACDC necesita 179 px
 
 
-# --------------------------------------------------------------------------- #
-# Lectura
-# --------------------------------------------------------------------------- #
-
 @dataclass(frozen=True)
 class Paciente:
     pid: str          # "patient001"
@@ -98,9 +94,7 @@ def cargar_fase(p: Paciente, fase: str):
             np.asarray(gt.dataobj).astype(np.uint8), espaciado)
 
 
-# --------------------------------------------------------------------------- #
 # Preprocesamiento reversible
-# --------------------------------------------------------------------------- #
 
 def normalizar_volumen(vol: np.ndarray) -> np.ndarray:
     """Recorte a percentiles 1-99 y z-score, con estadisticos DEL VOLUMEN.
@@ -131,17 +125,17 @@ def remuestrear(cortes: np.ndarray, tamano: Tuple[int, int], etiqueta: bool) -> 
     return out.squeeze(1).numpy().astype(np.float32)
 
 
+def _ventanas(n: int, tamano: int) -> Tuple[slice, slice]:
+    """Parte comun de un eje de largo n y otro de largo tamano, ambos centrados."""
+    comun = min(n, tamano)
+    a, b = (n - comun) // 2, (tamano - comun) // 2
+    return slice(a, a + comun), slice(b, b + comun)
+
+
 def centrar(arr: np.ndarray, tamano: int, relleno: float = 0.0) -> np.ndarray:
     """Recorta o rellena los dos ultimos ejes a (tamano, tamano), centrado."""
     out = np.full(arr.shape[:-2] + (tamano, tamano), relleno, dtype=arr.dtype)
-    src, dst = [], []
-    for n in arr.shape[-2:]:
-        if n >= tamano:
-            a = (n - tamano) // 2
-            src.append(slice(a, a + tamano)); dst.append(slice(0, tamano))
-        else:
-            a = (tamano - n) // 2
-            src.append(slice(0, n)); dst.append(slice(a, a + n))
+    src, dst = zip(*(_ventanas(n, tamano) for n in arr.shape[-2:]))
     out[(..., *dst)] = arr[(..., *src)]
     return out
 
@@ -150,14 +144,7 @@ def descentrar(arr: np.ndarray, shape_hw: Tuple[int, int], relleno: float = 0.0)
     """Inversa de `centrar`: devuelve los dos ultimos ejes a `shape_hw`."""
     tamano = arr.shape[-1]
     out = np.full(arr.shape[:-2] + tuple(shape_hw), relleno, dtype=arr.dtype)
-    src, dst = [], []
-    for n in shape_hw:
-        if n >= tamano:
-            a = (n - tamano) // 2
-            dst.append(slice(a, a + tamano)); src.append(slice(0, tamano))
-        else:
-            a = (tamano - n) // 2
-            dst.append(slice(0, n)); src.append(slice(a, a + n))
+    dst, src = zip(*(_ventanas(n, tamano) for n in shape_hw))
     out[(..., *dst)] = arr[(..., *src)]
     return out
 
@@ -187,8 +174,7 @@ def a_nativo(probs: np.ndarray, geo: Geometria) -> np.ndarray:
     """Probabilidades (Z, C, TAMANO, TAMANO) -> (Z, C, H, W) en la grilla nativa.
 
     Se interpolan probabilidades y no etiquetas: el argmax se toma recien en la
-    resolucion final, asi los bordes no quedan escalonados. Fuera del recorte la
-    probabilidad es 1 para el fondo.
+    resolucion final, asi los bordes no quedan escalonados.
     """
     z, c = probs.shape[:2]
     fuera = np.zeros((c,), dtype=np.float32); fuera[FONDO] = 1.0
@@ -200,10 +186,6 @@ def a_nativo(probs: np.ndarray, geo: Geometria) -> np.ndarray:
     out = F.interpolate(t, size=geo.shape_hw, mode="bilinear", align_corners=False)
     return out.reshape(z, c, *geo.shape_hw).numpy()
 
-
-# --------------------------------------------------------------------------- #
-# Cache de cortes 2D
-# --------------------------------------------------------------------------- #
 
 def construir_cache(root: Path = ACDC_ROOT, destino: Path = CACHE_DIR) -> Path:
     """Preprocesa los 150 pacientes una vez y guarda los cortes en un .npz por split.
@@ -222,21 +204,25 @@ def construir_cache(root: Path = ACDC_ROOT, destino: Path = CACHE_DIR) -> Path:
                 pids += [p.pid] * len(cortes); fases += [fase] * len(cortes)
                 zs += list(range(len(cortes)))
         np.savez(destino / f"{split}.npz", imgs=np.concatenate(imgs), labs=np.concatenate(labs),
-                 pids=np.array(pids), fases=np.array(fases), zs=np.array(zs))
+                 pids=np.array(pids), fases=np.array(fases), zs=np.array(zs),
+                 espaciado=ESPACIADO_OBJETIVO, tamano=TAMANO)
     return destino
 
 
 def cargar_cache(split: str, destino: Path = CACHE_DIR, root: Path = ACDC_ROOT) -> Dict[str, np.ndarray]:
     path = Path(destino) / f"{split}.npz"
-    if not path.exists():
+    if not path.exists() or not _cache_vigente(path):
         construir_cache(root, destino)
     with np.load(path) as d:
         return {k: d[k] for k in d.files}
 
 
-# --------------------------------------------------------------------------- #
-# Pliegues por paciente y Dataset
-# --------------------------------------------------------------------------- #
+def _cache_vigente(path: Path) -> bool:
+    """Una cache de otra grilla entrenaria la red con otro preprocesamiento que la inferencia."""
+    with np.load(path) as d:
+        return ("espaciado" in d.files and float(d["espaciado"]) == ESPACIADO_OBJETIVO
+                and int(d["tamano"]) == TAMANO)
+
 
 def pliegues_por_paciente(pacientes: Sequence[Paciente], k: int = 5, seed: int = 0) -> Dict[str, int]:
     """pid -> pliegue, estratificado por grupo (20 por grupo -> 4 por pliegue).

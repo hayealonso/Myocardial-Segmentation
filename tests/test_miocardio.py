@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -58,9 +59,7 @@ def _escribir_splits(carpeta: Path, n: int = 4, size: int = 16, seed: int = 0) -
         np.save(carpeta / f"{split}_annot.npy", annot)
 
 
-# --------------------------------------------------------------------------
 # Datos
-# --------------------------------------------------------------------------
 
 
 def test_binarizacion_deja_solo_el_miocardio():
@@ -189,9 +188,7 @@ def test_resize_mantiene_la_mascara_binaria_y_alineada(img_size):
     assert iou > 0.95, f"imagen y mascara desalineadas tras el resize (IoU={iou:.3f})"
 
 
-# --------------------------------------------------------------------------
 # Metrica y perdida
-# --------------------------------------------------------------------------
 
 
 def test_iou_casos_limite():
@@ -263,9 +260,7 @@ def test_perdida_estable_con_logits_extremos():
     assert torch.isfinite(malo) and malo.item() > 1.0
 
 
-# --------------------------------------------------------------------------
 # Modelo
-# --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("size", [64, 75, 100, 128])
@@ -326,9 +321,7 @@ def test_checkpoint_ida_y_vuelta(tmp_path):
         )
 
 
-# --------------------------------------------------------------------------
 # Entrenamiento
-# --------------------------------------------------------------------------
 
 
 def test_run_epoch_promedia_por_muestra():
@@ -429,9 +422,7 @@ def test_el_pipeline_aprende_a_segmentar_anillos():
     assert val_iou > 0.7, f"no aprendio a segmentar anillos sinteticos: IoU={val_iou:.3f}"
 
 
-# --------------------------------------------------------------------------
 # Datos reales y checkpoint (se saltan si no estan en disco)
-# --------------------------------------------------------------------------
 
 
 def _splits_en_disco():
@@ -526,9 +517,7 @@ def test_checkpoint_reproduce_su_iou_de_validacion():
     assert val_iou == pytest.approx(ck["val_iou"], abs=1e-6)
 
 
-# --------------------------------------------------------------------------
 # Visualizacion
-# --------------------------------------------------------------------------
 
 
 def test_mapa_de_errores_colorea_cada_caso_y_deja_el_fondo_transparente():
@@ -558,3 +547,15 @@ def test_mapa_de_errores_colorea_cada_caso_y_deja_el_fondo_transparente():
     capa = capa_de_mascara(mask, COLOR_REAL)
     assert tuple(capa[0, 0]) == pytest.approx(COLOR_REAL)
     assert capa[0, 1, 3] == 0.0
+
+
+@pytest.mark.parametrize("notebook", ["EDA_miocardio.ipynb", "resultados_acdc.ipynb"])
+def test_lo_que_se_va_a_commitear_no_trae_salidas(notebook):
+    """Las salidas de los notebooks traen imagenes de pacientes y el repo es
+    publico. Se revisa la version preparada para commit (el indice de git): correr
+    el notebook en local esta bien, subirlo sin limpiar no."""
+    r = subprocess.run(["git", "show", f":{notebook}"], cwd=ROOT, capture_output=True, encoding="utf-8")
+    if r.returncode != 0:
+        pytest.skip(f"{notebook} no esta en el indice de git")
+    con_salidas = [c for c in json.loads(r.stdout)["cells"] if c.get("outputs")]
+    assert not con_salidas, f"{notebook}: {len(con_salidas)} celdas con salidas; usar Clear All Outputs"

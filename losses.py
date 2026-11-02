@@ -1,7 +1,7 @@
 """
-Metrica (IoU) y funcion de perdida para segmentacion binaria del miocardio.
+Metricas y perdidas de segmentacion: binaria (etapa 1) y multiclase (etapa 2).
 
-El dataset esta fuertemente desbalanceado (~1-1.5% de los pixeles son
+En la etapa 1 el dataset esta fuertemente desbalanceado (~1-1.5% de los pixeles son
 miocardio, ver EDA_miocardio.ipynb), asi que usar solo binary cross-entropy
 tiende a producir un modelo que predice "todo fondo". Por eso se combina:
 
@@ -67,9 +67,7 @@ class BCEDiceLoss(nn.Module):
 
 
 
-# --------------------------------------------------------------------------- #
 # Multiclase (etapa 2, ACDC): fondo, VD, miocardio, VI
-# --------------------------------------------------------------------------- #
 
 def dice_multiclase_loss(logits: torch.Tensor, targets: torch.Tensor,
                          ignorar_fondo: bool = True, suavizado: float = 1.0) -> torch.Tensor:
@@ -77,14 +75,11 @@ def dice_multiclase_loss(logits: torch.Tensor, targets: torch.Tensor,
 
     logits: (N, C, H, W); targets: (N, H, W) enteros en [0, C).
 
-    Por batch y no por imagen: en los cortes apicales y basales el VD o el VI
-    no aparecen, y un Dice por imagen con la clase ausente castiga cualquier
-    probabilidad residual con perdida ~1, lo que domina el gradiente.
+    Por batch y no por imagen: en cortes apicales y basales falta el VD o el VI, y
+    un Dice por imagen castigaria la probabilidad residual de esa clase ausente.
 
-    suavizado = 1 (Laplace) y no un eps diminuto: si la clase falta en TODO el
-    batch, su probabilidad residual (~1e-6) es comparable a un eps de 1e-6 y el
-    Dice cae a 0.5 aun con la prediccion perfecta. Con 1, una clase ausente bien
-    predicha da Dice ~1, y en las presentes (miles de pixeles) el efecto es nulo.
+    Suavizado 1 y no un eps diminuto: si la clase falta en todo el batch, eps=1e-6
+    da Dice 0.5 aun con la prediccion perfecta.
     """
     n_clases = logits.shape[1]
     probs = torch.softmax(logits, dim=1)
@@ -128,18 +123,18 @@ if __name__ == "__main__":
     # sanity checks sin datos reales
     torch.manual_seed(0)
 
-    # caso 1: prediccion perfecta -> IoU debe ser 1.0, dice_loss cercano a 0
+    # prediccion perfecta -> IoU 1.0, dice_loss ~0
     target = torch.zeros(2, 1, 8, 8)
     target[:, :, 2:5, 2:5] = 1.0
     perfect_logits = (target * 2 - 1) * 10  # logits grandes y del signo correcto
     print("IoU (prediccion perfecta):", iou_score(perfect_logits, target).item())
     print("Dice loss (prediccion perfecta):", dice_loss(perfect_logits, target).item())
 
-    # caso 2: prediccion totalmente opuesta -> IoU debe ser 0.0
+    # prediccion opuesta -> IoU 0.0
     wrong_logits = -perfect_logits
     print("IoU (prediccion opuesta):", iou_score(wrong_logits, target).item())
 
-    # caso 3: imagen sin miocardio, prediccion correcta (todo fondo) -> IoU = 1.0
+    # sin miocardio y bien predicho (todo fondo) -> IoU 1.0
     empty_target = torch.zeros(1, 1, 8, 8)
     empty_logits = torch.full((1, 1, 8, 8), -10.0)
     print("IoU (sin miocardio, bien predicho):", iou_score(empty_logits, empty_target).item())

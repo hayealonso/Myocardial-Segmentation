@@ -18,6 +18,7 @@ outputs/
 *.pt
 *.pth
 
-# notas personales, solo locales
-docs/guia-del-codigo.md
+# en el repo solo codigo y README: la documentacion extra es local
+docs/
+CLAUDE.md
 .vscode/

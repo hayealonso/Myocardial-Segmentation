@@ -4,18 +4,14 @@ Entrenamiento de la U-Net para segmentacion binaria del miocardio.
 Uso:
     python train.py <data_dir> [opciones]
 
-Ejemplo (rapido, para probar que todo corre en CPU):
-    python train.py cardiac_data --epochs 3 --img-size 128 --base-channels 16
+Prueba rapida (sin --out-dir sobrescribe outputs/best_model.pt):
+    python train.py cardiac_data --epochs 3 --out-dir outputs/prueba
 
-Ejemplo (entrenamiento completo, mejor calidad, mas lento):
+Mayor calidad, mas lento:
     python train.py cardiac_data --epochs 40 --img-size 256 --base-channels 32
 
-El script:
-  1. Carga y preprocesa los datos con cardiac_dataset.py
-  2. Entrena la U-Net minimizando BCEDiceLoss
-  3. En cada epoca evalua IoU en el set de validacion
-  4. Guarda el mejor checkpoint (segun IoU de val) en <out_dir>/best_model.pt
-  5. Al final, carga el mejor checkpoint y reporta el IoU en el set de test
+Guarda en <out_dir>/best_model.pt el mejor checkpoint segun el IoU de val y al
+final lo evalua en test.
 """
 
 from __future__ import annotations
@@ -36,7 +32,7 @@ from losses import BCEDiceLoss, iou_score
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Entrena U-Net para segmentar miocardio")
     p.add_argument("data_dir", type=str, help="Carpeta con train/val/test_imgs.npy y _annot.npy")
-    p.add_argument("--epochs", type=int, default=20)
+    p.add_argument("--epochs", type=int, default=25)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--img-size", type=int, default=128,
@@ -129,7 +125,7 @@ def main() -> None:
     loss_fn = BCEDiceLoss(bce_weight=0.5, dice_weight=0.5)
 
     best_val_iou = -1.0
-    history = []  # lista de dicts, uno por epoca, para graficar curvas despues
+    history = []
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
         train_loss, train_iou = run_epoch(model, train_loader, loss_fn, device, optimizer)

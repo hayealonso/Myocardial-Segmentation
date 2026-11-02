@@ -11,8 +11,8 @@ Por paciente:
 TTA: las 8 simetrias del cuadrado (flips + rotaciones de 90). La prediccion
 final promedia las probabilidades de todas las vistas; la dispersion de los
 biomarcadores ENTRE vistas es la incertidumbre del modulo de seguridad. En test
-se calcula por modelo y se promedia entre modelos, para que tenga la misma
-escala que en training (un modelo por paciente).
+se calcula por modelo y se promedia entre modelos; ese promedio recorta las colas,
+asi que el umbral calibrado en training (un modelo por paciente) tiende a marcar menos.
 
 Salidas en outputs/acdc/:
     pacientes.csv                       biomarcadores predichos, reales, Dice e incertidumbre
@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import csv
 from pathlib import Path
+from typing import Tuple
 
 import numpy as np
 import torch
@@ -56,12 +57,11 @@ def deshacer_vista(y: torch.Tensor, k: int, flip: bool) -> torch.Tensor:
 
 
 @torch.no_grad()
-def probabilidades_tta(model, cortes: np.ndarray, device, tta: bool = True) -> np.ndarray:
+def probabilidades_tta(model, cortes: np.ndarray, device) -> np.ndarray:
     """(Z, H, W) -> (V, Z, C, H, W): probabilidades de cada vista, ya desrotadas."""
     x = torch.from_numpy(cortes).unsqueeze(1).to(device)
-    vistas = vistas_d4(x) if tta else [(0, False, x)]
     salida = []
-    for k, flip, xv in vistas:
+    for k, flip, xv in vistas_d4(x):
         p = torch.softmax(model(xv).float(), dim=1)
         salida.append(deshacer_vista(p, k, flip).cpu().numpy())
     return np.stack(salida)
@@ -72,7 +72,7 @@ def mascara_nativa(probs: np.ndarray, geo: A.Geometria) -> np.ndarray:
     return A.a_nativo(probs, geo).argmax(1).astype(np.uint8)
 
 
-def procesar_paciente(p: A.Paciente, modelos, device) -> dict:
+def procesar_paciente(p: A.Paciente, modelos, device) -> Tuple[dict, dict]:
     fila = {"pid": p.pid, "split": p.split, "grupo": p.grupo, "sc": p.superficie_corporal}
     finales, gts, geos, por_vista = {}, {}, {}, {}
     for fase in A.FASES:
@@ -116,8 +116,14 @@ def main() -> None:
     args = ap.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    modelos = [cargar_modelo(Path(args.modelos) / f"fold{f}" / "model.pt", device)[0]
-               for f in range(args.k)]
+    modelos = []
+    for f in range(args.k):
+        model, ck = cargar_modelo(Path(args.modelos) / f"fold{f}" / "model.pt", device)
+        # otro k u otro pliegue le daria a un paciente un modelo que si lo vio
+        if (ck["fold"], ck["k"]) != (f, args.k):
+            raise ValueError(f"fold{f}/model.pt es del pliegue {ck['fold']} de {ck['k']}, "
+                             f"se esperaba {f} de {args.k}")
+        modelos.append(model)
     pliegue = A.pliegues_por_paciente(A.listar_pacientes(split="training"), k=args.k)
     out = Path(args.out)
     (out / "mascaras").mkdir(parents=True, exist_ok=True)

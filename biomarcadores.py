@@ -20,7 +20,8 @@ from typing import Dict, Sequence
 import numpy as np
 from scipy import ndimage
 
-VD, MIOCARDIO, VI = 1, 2, 3
+from acdc_data import MIOCARDIO, VD, VI
+
 DENSIDAD_MIOCARDIO = 1.05  # g/ml
 
 

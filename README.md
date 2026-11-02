@@ -14,11 +14,11 @@ Proyecto en dos etapas sobre resonancia magnetica cardiaca de eje corto. Las dos
 | Validacion (mejor epoca, 19 de 25) | 0.7231 |
 | Test | 0.7479 |
 
-Imagenes a 128x128, `base_channels=16`, BCE + Dice, CPU. Es el IoU promedio por imagen, medido a 128x128.
+Imagenes a 128x128, `base_channels=16`, BCE + Dice, CPU. Es el IoU promedio por imagen, medido a 128x128. La mascara quedo desalineada medio pixel al reducirla y corregirlo exige reentrenar: a la resolucion original de 256x256 el IoU de validacion es 0.7048.
 
 ### Etapa 2: ACDC original, test oficial de 50 pacientes
 
-Ninguna decision se tomo mirando test (ver [docs/plan-acdc.md](docs/plan-acdc.md)): validacion cruzada por paciente, biomarcadores fuera de pliegue para entrenar el clasificador, y umbrales de alerta fijados en training.
+Ninguna decision depende de test: validacion cruzada por paciente, biomarcadores fuera de pliegue para entrenar el clasificador, y umbrales de alerta fijados en training.
 
 | Segmentacion (Dice 3D, FD / FS) | |
 |---|---|
@@ -148,7 +148,6 @@ diagnostico.py             etapa 2: clasificador de los 5 grupos
 seguridad.py               etapa 2: alertas por paciente
 figuras_acdc.py            etapa 2: figuras
 resultados_acdc.ipynb      etapa 2: recorrido por los resultados
-docs/plan-acdc.md          etapa 2: diseno y protocolo de evaluacion
 tests/                     invariantes del pipeline
 outputs/                   resultados (fuera de git)
 ```

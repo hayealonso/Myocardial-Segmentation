@@ -1,7 +1,7 @@
 """
-Arquitectura U-Net (encoder-decoder con skip connections) para segmentacion
-binaria del miocardio a partir de una sola imagen 2D (enfoque 2D, sin usar
-cortes vecinos ni la secuencia temporal).
+Arquitectura U-Net (encoder-decoder con skip connections) para segmentar a
+partir de una sola imagen 2D, sin cortes vecinos ni secuencia temporal: miocardio
+binario en la etapa 1 y 4 clases en la etapa 2.
 
 Referencia: Ronneberger et al. "U-Net: Convolutional Networks for Biomedical
 Image Segmentation" (2015); Bernard et al. 2018 (revision de metodos ACDC).
@@ -13,8 +13,7 @@ concatena ("skip connection") los features del encoder de la misma
 resolucion, para recuperar detalle espacial fino que se pierde en el
 downsampling.
 
-Salida: logits de forma (N, 1, H, W). Se debe aplicar sigmoid + threshold
-(o usar BCEWithLogitsLoss directamente, que ya incluye el sigmoid).
+Salida: logits (N, out_channels, H, W), sin activacion: la aplican la perdida y la metrica.
 """
 
 from __future__ import annotations
@@ -114,7 +113,7 @@ class UNet(nn.Module):
         x = self.up3(x, x2)    # (N, 2c,   H/2,  W/2)
         x = self.up4(x, x1)    # (N, c,    H,    W)
 
-        return self.out_conv(x)  # (N, 1, H, W) logits
+        return self.out_conv(x)  # logits (N, out_channels, H, W)
 
 
 def count_parameters(model: nn.Module) -> int:
@@ -145,7 +144,8 @@ def load_checkpoint(path, map_location="cpu"):
     Los checkpoints anteriores a `save_checkpoint` no traen "mean"/"std".
     """
     checkpoint = torch.load(path, map_location=map_location, weights_only=True)
-    model = UNet(in_channels=1, out_channels=1, base_channels=checkpoint["base_channels"])
+    model = UNet(in_channels=1, out_channels=checkpoint.get("n_clases", 1),
+                 base_channels=checkpoint["base_channels"])
     model.load_state_dict(checkpoint["model_state"])
     model.to(map_location).eval()
     return model, checkpoint

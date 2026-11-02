@@ -47,11 +47,15 @@ def duda_segmentacion(df: pd.DataFrame, referencia: pd.DataFrame) -> pd.Series:
 
 
 def riesgo_cobertura(acierto: np.ndarray, duda: np.ndarray):
-    """Exactitud cuando se conservan solo los `cobertura` casos menos dudosos."""
+    """Exactitud al conservar los casos menos dudosos, con un punto por nivel de duda.
+
+    Los empates entran juntos: cortarlos haria depender la curva del orden de las filas.
+    """
     orden = np.argsort(duda, kind="stable")
-    acierto = acierto[orden]
+    acierto, duda = acierto[orden], duda[orden]
     n = np.arange(1, len(acierto) + 1)
-    return n / len(acierto), np.cumsum(acierto) / n
+    fin_de_nivel = np.r_[duda[1:] != duda[:-1], True]
+    return (n / len(acierto))[fin_de_nivel], (np.cumsum(acierto) / n)[fin_de_nivel]
 
 
 def main() -> None:

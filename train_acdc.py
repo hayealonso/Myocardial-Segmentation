@@ -3,7 +3,8 @@ Entrena la U-Net multiclase (fondo, VD, miocardio, VI) sobre un pliegue del ACDC
 
 Uso:
     python train_acdc.py --fold 0            # un pliegue (de 5)
-    python train_acdc.py --fold 0 --epochs 2 # prueba rapida
+    python train_acdc.py --fold 0 --epochs 2 --out-dir outputs/prueba
+        # prueba rapida; sin --out-dir sobrescribe el modelo entrenado
 
 Validacion cruzada de 5 pliegues por paciente sobre los 100 de `training`
 (ver docs/plan-acdc.md). Se entrena un numero FIJO de epocas y se guarda el
@@ -29,7 +30,7 @@ from acdc_data import (
     CortesACDC, cargar_cache, listar_pacientes, pliegues_por_paciente,
 )
 from losses import CEDiceLoss
-from model import UNet, count_parameters
+from model import UNet, count_parameters, load_checkpoint
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,11 +57,11 @@ def guardar_modelo(path: Path, model: UNet, args, epoca: int) -> None:
 
 
 def cargar_modelo(path, map_location="cpu"):
-    """Devuelve (modelo en modo eval, dict del checkpoint)."""
-    ck = torch.load(path, map_location=map_location, weights_only=True)
-    model = UNet(in_channels=1, out_channels=ck["n_clases"], base_channels=ck["base_channels"])
-    model.load_state_dict(ck["model_state"])
-    model.to(map_location).eval()
+    """Devuelve (modelo en modo eval, dict del checkpoint), si usa la grilla actual."""
+    model, ck = load_checkpoint(path, map_location=map_location)
+    if ck["espaciado"] != ESPACIADO_OBJETIVO or ck["tamano"] != TAMANO:
+        raise ValueError(f"{path}: entrenado con {ck['espaciado']} mm y {ck['tamano']} px, "
+                         f"la grilla actual es {ESPACIADO_OBJETIVO} mm y {TAMANO} px")
     return model, ck
 
 

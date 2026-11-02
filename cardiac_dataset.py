@@ -29,18 +29,11 @@ from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
 
-# torch es opcional: el pipeline de numpy funciona sin el.
-# Se importa "lazy" adentro de las clases/funciones que lo necesitan
-# para que este modulo tambien sirva en un entorno sin torch instalado.
+# torch se importa adentro de las funciones: el pipeline de numpy funciona sin el.
 
 
 MYOCARDIUM_LABEL = 1  # clase de interes en <split>_annot.npy
 SPLITS = ("train", "val", "test")
-
-
-# --------------------------------------------------------------------------- #
-# 1) Carga + binarizacion + normalizacion (numpy puro)
-# --------------------------------------------------------------------------- #
 
 @dataclass
 class SplitData:
@@ -88,8 +81,9 @@ def load_splits(
     if stats is None:
         train_imgs_uint8, _ = raw["train"]
         # float de python y no np.float32: asi el checkpoint carga con weights_only=True
-        mean = float(train_imgs_uint8.astype(np.float32).mean() / 255.0)
-        std = float(train_imgs_uint8.astype(np.float32).std() / 255.0)
+        train_float = train_imgs_uint8.astype(np.float32)
+        mean = float(train_float.mean() / 255.0)
+        std = float(train_float.std() / 255.0)
     else:
         mean, std = float(stats["mean"]), float(stats["std"])
 
@@ -111,10 +105,6 @@ def class_balance(masks: np.ndarray) -> Tuple[float, float]:
     return (total - fg) / total, fg / total
 
 
-# --------------------------------------------------------------------------- #
-# 2) Dataset de PyTorch (con augmentation opcional para train)
-# --------------------------------------------------------------------------- #
-
 class CardiacDataset:
     """torch.utils.data.Dataset para el problema de segmentacion binaria.
 
@@ -130,8 +120,6 @@ class CardiacDataset:
     """
 
     def __init__(self, split_data: SplitData, augment: bool = False, img_size: int | None = None):
-        import torch  # import lazy
-        self._torch = torch
         self.images = split_data.images
         self.masks = split_data.masks
         self.augment = augment
@@ -141,7 +129,8 @@ class CardiacDataset:
         return len(self.images)
 
     def __getitem__(self, idx: int):
-        torch = self._torch
+        import torch
+
         img = self.images[idx].copy()
         mask = self.masks[idx].copy()
 
@@ -166,7 +155,8 @@ class CardiacDataset:
                 img_t.unsqueeze(0), size=(self.img_size, self.img_size),
                 mode="bilinear", align_corners=False,
             ).squeeze(0)
-            # nearest para la mascara: no queremos valores intermedios entre 0 y 1
+            # nearest evita valores intermedios, pero corre la mascara medio pixel respecto de
+            # la imagen. outputs/best_model.pt aprendio ese desfase: corregirlo exige reentrenar.
             mask_t = F.interpolate(
                 mask_t.unsqueeze(0), size=(self.img_size, self.img_size), mode="nearest",
             ).squeeze(0)

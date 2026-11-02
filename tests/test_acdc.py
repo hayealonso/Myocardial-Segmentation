@@ -21,9 +21,7 @@ ACDC = ROOT / "data" / "ACDC" / "database"
 hay_acdc = pytest.mark.skipif(not ACDC.exists(), reason="data/ACDC no esta en disco")
 
 
-# --------------------------------------------------------------------------
 # Preprocesamiento
-# --------------------------------------------------------------------------
 
 
 def test_normalizacion_no_depende_de_la_escala_del_equipo():
@@ -125,9 +123,7 @@ def test_fuera_del_recorte_la_prediccion_es_fondo():
     assert (nativo[:40] == A.FONDO).all() and (nativo[150, 150] == A.MIOCARDIO)
 
 
-# --------------------------------------------------------------------------
 # Pliegues y Dataset
-# --------------------------------------------------------------------------
 
 
 def _pacientes_falsos(por_grupo=20):
@@ -168,9 +164,7 @@ def test_aumentacion_multiclase_transforma_imagen_y_mascara_igual():
     assert len(vistas) == 8
 
 
-# --------------------------------------------------------------------------
 # Perdida y metricas multiclase
-# --------------------------------------------------------------------------
 
 
 def test_dice_multiclase_con_clase_ausente():
@@ -196,9 +190,7 @@ def test_dice_y_iou_valores_conocidos():
     assert dice_y_iou(pred, real, 3) == (1.0, 1.0)  # ausente en ambas
 
 
-# --------------------------------------------------------------------------
 # Datos reales
-# --------------------------------------------------------------------------
 
 
 @pytest.mark.datos
@@ -219,7 +211,7 @@ def test_listado_oficial_completo():
 def test_convencion_de_etiquetas_del_acdc():
     """1 = VD y 3 = VI son cavidades: se achican de ED a ES. 2 = miocardio:
     su volumen casi no cambia (la anotacion varia hasta ~40 %, patient089).
-    Un error de deteccion muy claro: la mediana entre pacientes es ~1. Confundir esta convencion con la de los .npy
+    La mediana entre pacientes es ~1. Confundir esta convencion con la de los .npy
     (1 = miocardio) entrenaria la red para segmentar el VD como "miocardio"."""
     ps = A.listar_pacientes(ACDC, "training")[::4]
     ratios = []
@@ -250,3 +242,40 @@ def test_el_recorte_no_corta_ningun_corazon():
             recortado = A.centrar(rem, A.TAMANO)
             for c in (A.VD, A.MIOCARDIO, A.VI):
                 assert (recortado == c).sum() == (rem == c).sum(), f"{p.pid} {fase} clase {c}"
+
+
+@pytest.mark.parametrize("cambio", [{"ESPACIADO_OBJETIVO": 2.0}, {"TAMANO": 96}])
+def test_cache_de_otra_grilla_se_reconstruye(tmp_path, monkeypatch, cambio):
+    """train_acdc lee la cache e inferir_acdc preprocesa en vivo. Con una cache
+    de otra grilla la red se entrena en otra escala de la que se evalua, y todo
+    corre sin error."""
+    imgs = np.zeros((1, A.TAMANO, A.TAMANO), dtype=np.float32)
+    np.savez(tmp_path / "training.npz", imgs=imgs, espaciado=A.ESPACIADO_OBJETIVO, tamano=A.TAMANO)
+    reconstruida = []
+    monkeypatch.setattr(A, "construir_cache", lambda root, destino: reconstruida.append(True))
+
+    A.cargar_cache("training", destino=tmp_path)
+    assert not reconstruida, "reconstruyo una cache vigente"
+
+    for nombre, valor in cambio.items():
+        monkeypatch.setattr(A, nombre, valor)
+    A.cargar_cache("training", destino=tmp_path)
+    assert reconstruida, "uso una cache de otra grilla"
+
+
+def test_modelo_de_otra_grilla_no_se_carga(tmp_path):
+    """Un modelo entrenado a otra resolucion produce mascaras plausibles sobre
+    la grilla actual: el error solo se ve como volumenes corridos."""
+    import train_acdc
+    from model import UNet
+
+    path = tmp_path / "model.pt"
+    ck = {"model_state": UNet(out_channels=A.N_CLASES, base_channels=2).state_dict(),
+          "base_channels": 2, "n_clases": A.N_CLASES, "fold": 0, "k": 5, "seed": 0, "epocas": 1,
+          "espaciado": A.ESPACIADO_OBJETIVO, "tamano": A.TAMANO}
+    torch.save(ck, path)
+    assert train_acdc.cargar_modelo(path)[1]["n_clases"] == A.N_CLASES
+
+    torch.save({**ck, "espaciado": 2.0}, path)
+    with pytest.raises(ValueError):
+        train_acdc.cargar_modelo(path)
